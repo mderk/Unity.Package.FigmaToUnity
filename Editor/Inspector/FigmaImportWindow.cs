@@ -31,6 +31,12 @@ namespace Figma.Inspectors
         bool fetching;
         bool importing;
 
+        string cachedFileKey;
+        string cachedJson;
+
+        string statusMessage;
+        MessageType statusType;
+
         List<FrameInfo> frames = new();
         Vector2 scrollPosition;
         string searchBar = "";
@@ -80,6 +86,7 @@ namespace Figma.Inspectors
 
             DrawFileKeySection();
             DrawOutputSection();
+            DrawStatusMessage();
             DrawFramesList();
             DrawImportButtons();
         }
@@ -138,10 +145,20 @@ namespace Figma.Inspectors
                 if (EditorGUI.EndChangeCheck())
                     EditorPrefs.SetString(fileKeyPrefKey, fileKey);
 
+                bool hasCachedFrames = frames.Count > 0 && cachedFileKey == fileKey;
+
                 using (new EditorGUI.DisabledScope(fileKey.NullOrEmpty() || fetching))
                 {
-                    if (GUILayout.Button(fetching ? "Fetching..." : "Fetch Pages", GUILayout.Width(100)))
-                        FetchPages();
+                        if (hasCachedFrames)
+                    {
+                        if (GUILayout.Button(fetching ? "Fetching..." : "Refresh", GUILayout.Width(100)))
+                            FetchPages(forceRefresh: true);
+                    }
+                    else
+                    {
+                        if (GUILayout.Button(fetching ? "Fetching..." : "Fetch Pages", GUILayout.Width(100)))
+                            FetchPages(forceRefresh: false);
+                    }
                 }
             }
         }
@@ -170,11 +187,20 @@ namespace Figma.Inspectors
             }
         }
 
+        void DrawStatusMessage()
+        {
+            if (statusMessage.NullOrEmpty())
+                return;
+
+            EditorGUILayout.HelpBox(statusMessage, statusType);
+        }
+
         void DrawFramesList()
         {
             if (frames.Count == 0)
             {
-                EditorGUILayout.HelpBox("Click 'Fetch Pages' to load the document structure from Figma.", MessageType.Info);
+                if (statusMessage.NullOrEmpty())
+                    EditorGUILayout.HelpBox("Click 'Fetch Pages' to load the document structure from Figma.", MessageType.Info);
                 return;
             }
 
@@ -232,18 +258,43 @@ namespace Figma.Inspectors
         #endregion
 
         #region Support Methods
+        void SetStatus(string message, MessageType type)
+        {
+            statusMessage = message;
+            statusType = type;
+            Repaint();
+        }
+
+        void ClearStatus()
+        {
+            statusMessage = null;
+            Repaint();
+        }
+
         // ReSharper disable once AsyncVoidMethod
-        async void FetchPages()
+        async void FetchPages(bool forceRefresh = false)
         {
             fetching = true;
-            Repaint();
+            ClearStatus();
 
             try
             {
-                using FigmaDownloader downloader = new(PersonalAccessToken, fileKey,
-                    new AssetsInfo(Application.dataPath, "Assets", "temp", Array.Empty<string>()));
+                string json;
 
-                string json = await downloader.FetchShallowAsync(CancellationToken.None);
+                if (!forceRefresh && cachedFileKey == fileKey && cachedJson.NotNullOrEmpty())
+                {
+                    json = cachedJson;
+                }
+                else
+                {
+                    using FigmaDownloader downloader = new(PersonalAccessToken, fileKey,
+                        new AssetsInfo(Application.dataPath, "Assets", "temp", Array.Empty<string>()));
+
+                    json = await downloader.FetchShallowAsync(CancellationToken.None);
+                    cachedFileKey = fileKey;
+                    cachedJson = json;
+                }
+
                 Data data = await Task.Run(() => JsonUtility.FromJson<Data>(json));
 
                 frames.Clear();
@@ -262,10 +313,11 @@ namespace Figma.Inspectors
                     }
                 }
 
-                Debug.Log($"[FigmaImport] Fetched {frames.Count} frames from {data.document.children.Length} pages");
+                SetStatus($"Fetched {frames.Count} frames from {data.document.children.Length} pages.", MessageType.Info);
             }
             catch (Exception e)
             {
+                SetStatus($"Failed to fetch: {e.Message}", MessageType.Error);
                 Debug.LogError($"[FigmaImport] Failed to fetch pages: {e.Message}");
             }
             finally
@@ -279,7 +331,7 @@ namespace Figma.Inspectors
         async void RunImport(bool downloadImages)
         {
             importing = true;
-            Repaint();
+            ClearStatus();
 
             List<string> selectedPaths = frames.Where(f => f.selected).Select(f => f.path).ToList();
             string uxmlName = "Figma";
@@ -314,15 +366,24 @@ namespace Figma.Inspectors
                 downloader.RemoveEmptyDirectories();
 
                 stopwatch.Stop();
-                Debug.Log($"{display} is <color={SuccessColor}>completed</color> in {(float)stopwatch.ElapsedMilliseconds / 1000}s — output: {outputFolder}");
+                float seconds = (float)stopwatch.ElapsedMilliseconds / 1000;
+                SetStatus($"Import completed in {seconds:F1}s — output: {outputFolder}", MessageType.Info);
+                Debug.Log($"{display} is <color={SuccessColor}>completed</color> in {seconds}s — output: {outputFolder}");
                 Progress.Finish(progress);
             }
             catch (Exception e)
             {
                 Progress.Finish(progress, Progress.Status.Failed);
 
-                if (e is not OperationCanceledException)
+                if (e is OperationCanceledException)
+                {
+                    SetStatus("Import cancelled.", MessageType.Warning);
+                }
+                else
+                {
+                    SetStatus($"Import failed: {e.Message}", MessageType.Error);
                     Debug.LogException(e);
+                }
             }
             finally
             {
