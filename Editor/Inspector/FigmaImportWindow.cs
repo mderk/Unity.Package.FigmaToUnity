@@ -407,68 +407,59 @@ namespace Figma.Inspectors
 
             scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
 
-            // Reserve full height, draw only visible range
-            int firstVisible = Mathf.Max(0, Mathf.FloorToInt(scrollPosition.y / rowHeight) - 1);
-            int visibleCount = Mathf.CeilToInt(EditorGUIUtility.currentViewWidth > 0 ? Screen.height / rowHeight : 30) + 3;
-            int lastVisible = Mathf.Min(totalRows, firstVisible + visibleCount);
+            // Reserve total height with a single Space, then draw visible rows via manual Rect
+            GUILayout.Space(totalHeight);
+            UnityEngine.Rect scrollRect = GUILayoutUtility.GetLastRect();
 
-            if (firstVisible > 0)
-                GUILayout.Space(firstVisible * rowHeight);
+            int firstVisible = Mathf.Max(0, Mathf.FloorToInt(scrollPosition.y / rowHeight));
+            float viewHeight = position.height;
+            int lastVisible = Mathf.Min(totalRows, Mathf.CeilToInt((scrollPosition.y + viewHeight) / rowHeight) + 1);
 
             for (int i = firstVisible; i < lastVisible; i++)
             {
+                UnityEngine.Rect rowRect = new(scrollRect.x, scrollRect.y + i * rowHeight, scrollRect.width, rowHeight);
                 (FrameInfo frame, string pageName) = visibleRows[i];
 
                 if (frame == null)
                 {
                     // Page header
-                    using (new EditorGUILayout.HorizontalScope(GUILayout.Height(rowHeight)))
+                    UnityEngine.Rect labelRect = new(rowRect.x, rowRect.y, rowRect.width - 36, rowRect.height);
+                    EditorGUI.LabelField(labelRect, pageName, EditorStyles.miniLabel);
+
+                    UnityEngine.Rect btnRect = new(rowRect.xMax - 34, rowRect.y, 32, rowRect.height);
+                    string page = pageName;
+                    List<FrameInfo> pageFrames = frames.Where(f => f.pageName == page).ToList();
+                    bool allSelected = pageFrames.All(f => f.selected);
+
+                    if (GUI.Button(btnRect, allSelected ? "none" : "all", EditorStyles.miniButton))
                     {
-                        EditorGUILayout.LabelField(pageName, EditorStyles.miniLabel);
-
-                        string page = pageName;
-                        List<FrameInfo> pageFrames = frames.Where(f => f.pageName == page).ToList();
-                        bool allSelected = pageFrames.All(f => f.selected);
-
-                        if (GUILayout.Button(allSelected ? "none" : "all", EditorStyles.miniButton, GUILayout.Width(32)))
-                        {
-                            bool newState = !allSelected;
-                            pageFrames.ForEach(f => f.selected = newState);
-                            SaveSelectedFrames();
-                        }
+                        bool newState = !allSelected;
+                        pageFrames.ForEach(f => f.selected = newState);
+                        SaveSelectedFrames();
                     }
                 }
                 else
                 {
-                    using (new EditorGUILayout.HorizontalScope(GUILayout.Height(rowHeight)))
-                    {
-                        // Thumbnail
-                        if (hasThumbnails)
-                        {
-                            if (frame.thumbnail != null)
-                            {
-                                float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
-                                float thumbWidth = thumbnailHeight * aspect;
-                                UnityEngine.Rect thumbRect = GUILayoutUtility.GetRect(thumbWidth, thumbnailHeight, GUILayout.Width(thumbWidth), GUILayout.Height(thumbnailHeight));
-                                GUI.DrawTexture(thumbRect, frame.thumbnail, UnityEngine.ScaleMode.ScaleToFit);
-                            }
-                            else
-                            {
-                                GUILayout.Space(thumbnailHeight);
-                            }
-                        }
+                    float xOffset = rowRect.x;
 
-                        // Checkbox
-                        EditorGUI.BeginChangeCheck();
-                        frame.selected = EditorGUILayout.ToggleLeft(frame.frameName, frame.selected);
-                        if (EditorGUI.EndChangeCheck())
-                            SaveSelectedFrames();
+                    // Thumbnail
+                    if (hasThumbnails && frame.thumbnail != null)
+                    {
+                        float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
+                        float thumbWidth = thumbnailHeight * aspect;
+                        UnityEngine.Rect thumbRect = new(xOffset, rowRect.y, thumbWidth, thumbnailHeight);
+                        GUI.DrawTexture(thumbRect, frame.thumbnail, UnityEngine.ScaleMode.ScaleToFit);
+                        xOffset += thumbWidth + 4;
                     }
+
+                    // Checkbox
+                    UnityEngine.Rect toggleRect = new(xOffset, rowRect.y, rowRect.xMax - xOffset, rowRect.height);
+                    EditorGUI.BeginChangeCheck();
+                    frame.selected = EditorGUI.ToggleLeft(toggleRect, frame.frameName, frame.selected);
+                    if (EditorGUI.EndChangeCheck())
+                        SaveSelectedFrames();
                 }
             }
-
-            if (lastVisible < totalRows)
-                GUILayout.Space((totalRows - lastVisible) * rowHeight);
 
             EditorGUILayout.EndScrollView();
         }
