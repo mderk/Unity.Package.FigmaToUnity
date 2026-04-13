@@ -835,7 +835,7 @@ namespace Figma.Inspectors
             ClearStatus();
 
             List<string> selectedPaths = frames.Where(f => f.selected).Select(f => f.path).ToList();
-            string uxmlName = "Figma";
+            string uxmlName = documentName.NotNullOrEmpty() ? documentName : "Figma";
 
             string absoluteOutputFolder = outputFolder.StartsWith("Assets")
                 ? Path.Combine(Directory.GetCurrentDirectory(), outputFolder)
