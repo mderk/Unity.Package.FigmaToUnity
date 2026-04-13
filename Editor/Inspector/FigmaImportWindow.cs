@@ -402,8 +402,8 @@ namespace Figma.Inspectors
                         {
                             float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
                             float thumbWidth = thumbnailHeight * aspect;
-                            Rect thumbRect = GUILayoutUtility.GetRect(thumbWidth, thumbnailHeight, GUILayout.Width(thumbWidth), GUILayout.Height(thumbnailHeight));
-                            GUI.DrawTexture(thumbRect, frame.thumbnail, ScaleMode.ScaleToFit);
+                            UnityEngine.Rect thumbRect = GUILayoutUtility.GetRect(thumbWidth, thumbnailHeight, GUILayout.Width(thumbWidth), GUILayout.Height(thumbnailHeight));
+                            GUI.DrawTexture(thumbRect, frame.thumbnail, UnityEngine.ScaleMode.ScaleToFit);
                         }
                         else
                         {
