@@ -80,6 +80,8 @@ namespace Figma
             foreach (CanvasNode canvasNode in rootNodes.Canvases)
                 framesPaths.TryAdd(canvasNode.name, new List<string>());
 
+            UnityEngine.Debug.Log($"[FigmaImport] WriteAsync: {rootNodes.Frames.Count} frames, {rootNodes.ComponentSets.Count} componentSets, {rootNodes.Elements.Count} elements, {rootNodes.Canvases.Count} canvases");
+            foreach (var f in rootNodes.Frames) UnityEngine.Debug.Log($"[FigmaImport]   Frame: {f.name} (parent: {f.parent?.name} [{f.parent?.GetType().Name}])");
             List<Task> tasks = new(rootNodes.Frames.Count + rootNodes.ComponentSets.Count + rootNodes.Elements.Count);
             tasks.AddRange(rootNodes.Frames.Select(x => Task.Run(() => WriteFrame(uxmlBuilder, framesPaths, componentSets, x))));
             tasks.AddRange(rootNodes.ComponentSets.Select(x => Task.Run(() => WriteComponentSet(uxmlBuilder, x))));

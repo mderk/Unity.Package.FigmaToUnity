@@ -835,7 +835,8 @@ namespace Figma.Inspectors
             ClearStatus();
 
             List<string> selectedPaths = frames.Where(f => f.selected).Select(f => f.path).ToList();
-            string uxmlName = documentName.NotNullOrEmpty() ? documentName : "Figma";
+            string rawName = documentName.NotNullOrEmpty() ? documentName : "Figma";
+            string uxmlName = Regex.Replace(Regex.Replace(rawName, @"[^\w\-.]", "_"), @"_+", "_").Trim('_');
 
             string absoluteOutputFolder = outputFolder.StartsWith("Assets")
                 ? Path.Combine(Directory.GetCurrentDirectory(), outputFolder)
