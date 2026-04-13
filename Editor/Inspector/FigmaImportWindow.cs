@@ -429,7 +429,7 @@ namespace Figma.Inspectors
             {
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    Rect r = EditorGUILayout.GetControlRect(false, 28);
+                    UnityEngine.Rect r = EditorGUILayout.GetControlRect(false, 28);
                     EditorGUI.ProgressBar(r, -1f, importProgressLabel ?? "Importing...");
 
                     if (GUILayout.Button("Cancel", GUILayout.Height(28), GUILayout.Width(60)))

@@ -199,7 +199,7 @@ namespace Figma.Core
                 void InjectSubStyles(ComponentNode node, IReadOnlyList<UssStyle> defaultStyles, PseudoClass pseudoClass)
                 {
                     IReadOnlyList<UssStyle> styles = GetStyles(node);
-                    int count = Math.Min(styles.Count, defaultStyles.Count);
+                    int count = System.Math.Min(styles.Count, defaultStyles.Count);
                     for (int i = 0; i < count; i++)
                     {
                         UssStyle style = styles[i];
