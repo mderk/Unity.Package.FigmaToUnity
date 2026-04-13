@@ -347,6 +347,10 @@ namespace Figma
             if (assetsInfo.modifiedContent.Contains(assetsInfo.GetAbsolutePath(assetPath)))
                 return;
 
+            // Skip download if file already exists on disk (e.g. from a previous crashed import)
+            if (fileExists && !assetsInfo.cachedAssets.Map.ContainsKey(nodeID))
+                return;
+
             Progress.SetStepLabel(progress, url);
 
             using HttpRequestMessage request = new(HttpMethod.Get, url);
