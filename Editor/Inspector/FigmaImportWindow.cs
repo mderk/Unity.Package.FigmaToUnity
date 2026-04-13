@@ -59,7 +59,6 @@ namespace Figma.Inspectors
         Vector2 scrollPosition;
         string searchBar = "";
         bool thumbnailsLoading;
-        Vector2 selectedScrollPosition;
         readonly List<(FrameInfo frame, string pageName)> visibleRows = new();
         #endregion
 
@@ -138,8 +137,8 @@ namespace Figma.Inspectors
             DrawFileKeySection();
             DrawOutputSection();
             DrawStatusMessage();
-            DrawImportButtons();
             DrawFramesList();
+            DrawImportButtons();
         }
 
         void DrawTokenSection()
@@ -358,36 +357,6 @@ namespace Figma.Inspectors
                 }
             }
 
-            // Selected frames summary
-            List<FrameInfo> selectedFrames = frames.Where(f => f.selected).ToList();
-            if (selectedFrames.Count > 0)
-            {
-                EditorGUILayout.LabelField($"Selected ({selectedFrames.Count})", EditorStyles.miniLabel);
-                float selectedHeight = Mathf.Min(selectedFrames.Count * (EditorGUIUtility.singleLineHeight + 2), 120);
-                selectedScrollPosition = EditorGUILayout.BeginScrollView(selectedScrollPosition, GUILayout.Height(selectedHeight + 8));
-                foreach (FrameInfo sf in selectedFrames)
-                {
-                    using (new EditorGUILayout.HorizontalScope())
-                    {
-                        EditorGUILayout.LabelField(sf.path, EditorStyles.miniLabel);
-                        if (GUILayout.Button("x", EditorStyles.miniButton, GUILayout.Width(20)))
-                        {
-                            sf.selected = false;
-                            SaveSelectedFrames();
-                        }
-                    }
-                }
-                EditorGUILayout.EndScrollView();
-            }
-
-            // Separator
-            EditorGUILayout.Space(2);
-            UnityEngine.Rect sepRect = EditorGUILayout.GetControlRect(false, 1);
-            EditorGUI.DrawRect(sepRect, new Color(0.3f, 0.3f, 0.3f, 1f));
-            EditorGUILayout.Space(2);
-
-            EditorGUILayout.LabelField("All Frames", EditorStyles.miniLabel);
-
             bool hasThumbnails = frames.Any(f => f.thumbnail != null);
             float rowHeight = hasThumbnails ? thumbnailHeight + 4 : EditorGUIUtility.singleLineHeight + 2;
 
@@ -411,24 +380,60 @@ namespace Figma.Inspectors
             }
 
             int totalRows = visibleRows.Count;
-            float totalHeight = totalRows * rowHeight;
 
-            // Use GUILayoutUtility to get the remaining area, then manual scroll view
+            // Selected frames summary + All frames in one scroll region
+            List<FrameInfo> selectedFrames = frames.Where(f => f.selected).ToList();
+            float selectedSectionHeight = selectedFrames.Count > 0
+                ? EditorGUIUtility.singleLineHeight + 2 + selectedFrames.Count * (EditorGUIUtility.singleLineHeight + 2) + 6 + 1 + 6 + EditorGUIUtility.singleLineHeight + 2
+                : 0;
+            float totalHeight = selectedSectionHeight + totalRows * rowHeight;
+
             UnityEngine.Rect viewRect = GUILayoutUtility.GetRect(0, 10000, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
             UnityEngine.Rect contentRect = new(0, 0, viewRect.width - 14, totalHeight);
             scrollPosition = GUI.BeginScrollView(viewRect, scrollPosition, contentRect);
 
-            int firstVisible = Mathf.Max(0, Mathf.FloorToInt(scrollPosition.y / rowHeight));
-            int lastVisible = Mathf.Min(totalRows, Mathf.CeilToInt((scrollPosition.y + viewRect.height) / rowHeight) + 1);
+            float yOffset = 0;
+
+            // --- Selected frames ---
+            if (selectedFrames.Count > 0)
+            {
+                EditorGUI.LabelField(new UnityEngine.Rect(0, yOffset, contentRect.width, EditorGUIUtility.singleLineHeight), $"Selected ({selectedFrames.Count})", EditorStyles.miniLabel);
+                yOffset += EditorGUIUtility.singleLineHeight + 2;
+
+                foreach (FrameInfo sf in selectedFrames)
+                {
+                    UnityEngine.Rect labelRect = new(0, yOffset, contentRect.width - 24, EditorGUIUtility.singleLineHeight);
+                    EditorGUI.LabelField(labelRect, sf.path, EditorStyles.miniLabel);
+                    UnityEngine.Rect btnRect = new(contentRect.width - 20, yOffset, 20, EditorGUIUtility.singleLineHeight);
+                    if (GUI.Button(btnRect, "x", EditorStyles.miniButton))
+                    {
+                        sf.selected = false;
+                        SaveSelectedFrames();
+                    }
+                    yOffset += EditorGUIUtility.singleLineHeight + 2;
+                }
+
+                // Separator
+                yOffset += 3;
+                EditorGUI.DrawRect(new UnityEngine.Rect(0, yOffset, contentRect.width, 1), new Color(0.3f, 0.3f, 0.3f, 1f));
+                yOffset += 4;
+
+                EditorGUI.LabelField(new UnityEngine.Rect(0, yOffset, contentRect.width, EditorGUIUtility.singleLineHeight), "All Frames", EditorStyles.miniLabel);
+                yOffset += EditorGUIUtility.singleLineHeight + 2;
+            }
+
+            // --- All frames (virtualized) ---
+            float allFramesStartY = yOffset;
+            int firstVisible = Mathf.Max(0, Mathf.FloorToInt((scrollPosition.y - allFramesStartY) / rowHeight));
+            int lastVisible = Mathf.Min(totalRows, Mathf.CeilToInt((scrollPosition.y - allFramesStartY + viewRect.height) / rowHeight) + 1);
 
             for (int i = firstVisible; i < lastVisible; i++)
             {
-                UnityEngine.Rect rowRect = new(0, i * rowHeight, contentRect.width, rowHeight);
+                UnityEngine.Rect rowRect = new(0, allFramesStartY + i * rowHeight, contentRect.width, rowHeight);
                 (FrameInfo frame, string pageName) = visibleRows[i];
 
                 if (frame == null)
                 {
-                    // Page header
                     UnityEngine.Rect labelRect = new(rowRect.x, rowRect.y, rowRect.width - 36, rowRect.height);
                     EditorGUI.LabelField(labelRect, pageName, EditorStyles.miniLabel);
 
@@ -448,7 +453,6 @@ namespace Figma.Inspectors
                 {
                     float xOffset = rowRect.x;
 
-                    // Thumbnail
                     if (hasThumbnails && frame.thumbnail != null)
                     {
                         float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
@@ -458,7 +462,6 @@ namespace Figma.Inspectors
                         xOffset += thumbWidth + 4;
                     }
 
-                    // Checkbox
                     UnityEngine.Rect toggleRect = new(xOffset, rowRect.y, rowRect.xMax - xOffset, rowRect.height);
                     EditorGUI.BeginChangeCheck();
                     frame.selected = EditorGUI.ToggleLeft(toggleRect, frame.frameName, frame.selected);
