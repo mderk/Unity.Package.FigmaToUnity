@@ -357,6 +357,29 @@ namespace Figma.Inspectors
                 }
             }
 
+            // Selected frames summary
+            List<FrameInfo> selectedFrames = frames.Where(f => f.selected).ToList();
+            if (selectedFrames.Count > 0)
+            {
+                EditorGUILayout.LabelField("Selected", EditorStyles.miniLabel);
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    foreach (FrameInfo sf in selectedFrames)
+                    {
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            EditorGUILayout.LabelField(sf.path, EditorStyles.miniLabel);
+                            if (GUILayout.Button("x", EditorStyles.miniButton, GUILayout.Width(20)))
+                            {
+                                sf.selected = false;
+                                SaveSelectedFrames();
+                            }
+                        }
+                    }
+                }
+                EditorGUILayout.Space(4);
+            }
+
             bool hasThumbnails = frames.Any(f => f.thumbnail != null);
             float rowHeight = hasThumbnails ? thumbnailHeight + 4 : EditorGUIUtility.singleLineHeight + 2;
 
