@@ -21,6 +21,7 @@ namespace Figma.Core.Uss
         public UssWriter(string rootDirectory, string path)
         {
             this.rootDirectory = rootDirectory;
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path));
             stream = new StreamWriter(Path = path, false, Encoding.UTF8, 1024);
         }
         #endregion

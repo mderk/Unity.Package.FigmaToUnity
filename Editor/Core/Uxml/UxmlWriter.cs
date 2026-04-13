@@ -32,6 +32,7 @@ namespace Figma.Core.Uxml
         public UxmlWriter(string directory, string fileName)
         {
             filePath = CombinePath(directory, $"{fileName}.{KnownFormats.uxml}");
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(filePath));
             xmlWriter = XmlWriter.Create(filePath, xmlWriterSettings);
             xmlWriter.WriteStartElement(elementsNamespace, "UXML", uxmlNamespace);
         }
