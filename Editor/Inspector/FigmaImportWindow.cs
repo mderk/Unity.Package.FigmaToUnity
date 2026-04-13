@@ -21,6 +21,10 @@ namespace Figma.Inspectors
         static readonly string patKey = $"{nameof(Figma)}/{nameof(PersonalAccessToken)}";
         const string fileKeyPrefKey = "Figma/ImportWindow/FileKey";
         const string outputFolderPrefKey = "Figma/ImportWindow/OutputFolder";
+        const string recentKeysPrefKey = "Figma/ImportWindow/RecentKeys";
+        const int maxRecentKeys = 10;
+
+        static string CacheDirectory => Path.Combine(Directory.GetCurrentDirectory(), "Library", "FigmaCache");
         #endregion
 
         #region Fields
@@ -31,15 +35,17 @@ namespace Figma.Inspectors
         bool fetching;
         bool importing;
 
-        string cachedFileKey;
-        string cachedJson;
+        string documentName;
+        DateTime cacheDate;
 
         string statusMessage;
         MessageType statusType;
 
         List<FrameInfo> frames = new();
+        List<RecentFile> recentFiles = new();
         Vector2 scrollPosition;
         string searchBar = "";
+        bool showRecent;
         #endregion
 
         #region Types
@@ -49,6 +55,20 @@ namespace Figma.Inspectors
             public string frameName;
             public string path;
             public bool selected;
+        }
+
+        [Serializable]
+        class CacheEntry
+        {
+            public string json;
+            public string documentName;
+            public string cachedAt;
+        }
+
+        class RecentFile
+        {
+            public string fileKey;
+            public string name;
         }
         #endregion
 
@@ -75,6 +95,10 @@ namespace Figma.Inspectors
         {
             fileKey = EditorPrefs.GetString(fileKeyPrefKey, "");
             outputFolder = EditorPrefs.GetString(outputFolderPrefKey, "Assets/FigmaImport");
+            LoadRecentFiles();
+
+            if (fileKey.NotNullOrEmpty())
+                TryLoadFromDiskCache(fileKey);
         }
 
         void OnGUI()
@@ -138,25 +162,71 @@ namespace Figma.Inspectors
 
         void DrawFileKeySection()
         {
+            // File key input + dropdown
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUI.BeginChangeCheck();
                 fileKey = EditorGUILayout.TextField("File Key", fileKey);
                 if (EditorGUI.EndChangeCheck())
+                {
                     EditorPrefs.SetString(fileKeyPrefKey, fileKey);
+                    TryLoadFromDiskCache(fileKey);
+                }
 
-                bool hasCachedFrames = frames.Count > 0 && cachedFileKey == fileKey;
+                if (recentFiles.Count > 0)
+                {
+                    if (GUILayout.Button("\u25BC", GUILayout.Width(20)))
+                    {
+                        GenericMenu menu = new();
+                        foreach (RecentFile recent in recentFiles)
+                        {
+                            string label = recent.name.NotNullOrEmpty() ? $"{recent.name}  ({recent.fileKey})" : recent.fileKey;
+                            string key = recent.fileKey;
+                            menu.AddItem(new GUIContent(label), fileKey == key, () =>
+                            {
+                                fileKey = key;
+                                EditorPrefs.SetString(fileKeyPrefKey, fileKey);
+                                TryLoadFromDiskCache(fileKey);
+                                Repaint();
+                            });
+                        }
+                        menu.ShowAsContext();
+                    }
+                }
+            }
+
+            // Document name + cache info
+            if (documentName.NotNullOrEmpty())
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField("Document", documentName, EditorStyles.boldLabel);
+
+                    if (cacheDate != default)
+                    {
+                        string age = FormatCacheAge(cacheDate);
+                        EditorGUILayout.LabelField($"cached {age}", EditorStyles.miniLabel, GUILayout.Width(140));
+                    }
+                }
+            }
+
+            // Fetch / Refresh buttons
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUILayout.FlexibleSpace();
+
+                bool hasCachedFrames = frames.Count > 0;
 
                 using (new EditorGUI.DisabledScope(fileKey.NullOrEmpty() || fetching))
                 {
-                        if (hasCachedFrames)
+                    if (hasCachedFrames)
                     {
-                        if (GUILayout.Button(fetching ? "Fetching..." : "Refresh", GUILayout.Width(100)))
+                        if (GUILayout.Button(fetching ? "Fetching..." : "Refresh from Figma", GUILayout.Width(140)))
                             FetchPages(forceRefresh: true);
                     }
                     else
                     {
-                        if (GUILayout.Button(fetching ? "Fetching..." : "Fetch Pages", GUILayout.Width(100)))
+                        if (GUILayout.Button(fetching ? "Fetching..." : "Fetch Pages", GUILayout.Width(140)))
                             FetchPages(forceRefresh: false);
                     }
                 }
@@ -271,6 +341,105 @@ namespace Figma.Inspectors
             Repaint();
         }
 
+        static string FormatCacheAge(DateTime cacheTime)
+        {
+            TimeSpan age = DateTime.UtcNow - cacheTime;
+            if (age.TotalMinutes < 1) return "just now";
+            if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes}m ago";
+            if (age.TotalHours < 24) return $"{(int)age.TotalHours}h ago";
+            return $"{(int)age.TotalDays}d ago";
+        }
+
+        #region Disk Cache
+        static string GetCachePath(string key) => Path.Combine(CacheDirectory, $"{key}.json");
+
+        void SaveToDiskCache(string key, string json, string docName)
+        {
+            Directory.CreateDirectory(CacheDirectory);
+            CacheEntry entry = new() { json = json, documentName = docName, cachedAt = DateTime.UtcNow.ToString("O") };
+            File.WriteAllText(GetCachePath(key), JsonUtility.ToJson(entry));
+        }
+
+        bool TryLoadFromDiskCache(string key)
+        {
+            frames.Clear();
+            documentName = null;
+            cacheDate = default;
+
+            string path = GetCachePath(key);
+            if (!File.Exists(path))
+                return false;
+
+            try
+            {
+                CacheEntry entry = JsonUtility.FromJson<CacheEntry>(File.ReadAllText(path));
+                if (entry?.json == null)
+                    return false;
+
+                Data data = JsonUtility.FromJson<Data>(entry.json);
+                PopulateFrames(data);
+
+                documentName = entry.documentName;
+                if (DateTime.TryParse(entry.cachedAt, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime parsed))
+                    cacheDate = parsed;
+
+                SetStatus($"Loaded {frames.Count} frames from cache ({FormatCacheAge(cacheDate)}).", MessageType.Info);
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[FigmaImport] Failed to load cache: {e.Message}");
+                return false;
+            }
+        }
+        #endregion
+
+        #region Recent Files
+        void LoadRecentFiles()
+        {
+            recentFiles.Clear();
+            string raw = EditorPrefs.GetString(recentKeysPrefKey, "");
+            if (raw.NullOrEmpty()) return;
+
+            foreach (string entry in raw.Split(';'))
+            {
+                string[] parts = entry.Split('|');
+                if (parts.Length >= 1 && parts[0].NotNullOrEmpty())
+                    recentFiles.Add(new RecentFile { fileKey = parts[0], name = parts.Length > 1 ? parts[1] : null });
+            }
+        }
+
+        void AddRecentFile(string key, string name)
+        {
+            recentFiles.RemoveAll(r => r.fileKey == key);
+            recentFiles.Insert(0, new RecentFile { fileKey = key, name = name });
+            if (recentFiles.Count > maxRecentKeys)
+                recentFiles.RemoveRange(maxRecentKeys, recentFiles.Count - maxRecentKeys);
+
+            string serialized = string.Join(";", recentFiles.Select(r => $"{r.fileKey}|{r.name ?? ""}"));
+            EditorPrefs.SetString(recentKeysPrefKey, serialized);
+        }
+        #endregion
+
+        void PopulateFrames(Data data)
+        {
+            frames.Clear();
+            foreach (CanvasNode page in data.document.children)
+            {
+                if (page.children == null) continue;
+                foreach (SceneNode frame in page.children)
+                {
+                    frames.Add(new FrameInfo
+                    {
+                        pageName = page.name,
+                        frameName = frame.name,
+                        path = $"{page.name}/{frame.name}",
+                        selected = false
+                    });
+                }
+            }
+        }
+
         // ReSharper disable once AsyncVoidMethod
         async void FetchPages(bool forceRefresh = false)
         {
@@ -281,37 +450,26 @@ namespace Figma.Inspectors
             {
                 string json;
 
-                if (!forceRefresh && cachedFileKey == fileKey && cachedJson.NotNullOrEmpty())
+                if (!forceRefresh && TryLoadFromDiskCache(fileKey))
                 {
-                    json = cachedJson;
+                    fetching = false;
+                    Repaint();
+                    return;
                 }
-                else
-                {
-                    using FigmaDownloader downloader = new(PersonalAccessToken, fileKey,
-                        new AssetsInfo(Application.dataPath, "Assets", "temp", Array.Empty<string>()));
 
-                    json = await downloader.FetchShallowAsync(CancellationToken.None);
-                    cachedFileKey = fileKey;
-                    cachedJson = json;
-                }
+                using FigmaDownloader downloader = new(PersonalAccessToken, fileKey,
+                    new AssetsInfo(Application.dataPath, "Assets", "temp", Array.Empty<string>()));
+
+                json = await downloader.FetchShallowAsync(CancellationToken.None);
 
                 Data data = await Task.Run(() => JsonUtility.FromJson<Data>(json));
+                PopulateFrames(data);
 
-                frames.Clear();
-                foreach (CanvasNode page in data.document.children)
-                {
-                    if (page.children == null) continue;
-                    foreach (SceneNode frame in page.children)
-                    {
-                        frames.Add(new FrameInfo
-                        {
-                            pageName = page.name,
-                            frameName = frame.name,
-                            path = $"{page.name}/{frame.name}",
-                            selected = false
-                        });
-                    }
-                }
+                documentName = data.name;
+                cacheDate = DateTime.UtcNow;
+
+                SaveToDiskCache(fileKey, json, documentName);
+                AddRecentFile(fileKey, documentName);
 
                 SetStatus($"Fetched {frames.Count} frames from {data.document.children.Length} pages.", MessageType.Info);
             }
