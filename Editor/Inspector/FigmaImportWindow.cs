@@ -59,6 +59,7 @@ namespace Figma.Inspectors
         Vector2 scrollPosition;
         string searchBar = "";
         bool thumbnailsLoading;
+        bool generateRootDocument;
         readonly List<(FrameInfo frame, string pageName)> visibleRows = new();
         #endregion
 
@@ -136,6 +137,7 @@ namespace Figma.Inspectors
 
             DrawFileKeySection();
             DrawOutputSection();
+            generateRootDocument = EditorGUILayout.Toggle("Generate Root Document", generateRootDocument);
             DrawStatusMessage();
             DrawFramesList();
             DrawImportButtons();
@@ -875,9 +877,10 @@ namespace Figma.Inspectors
                 AssetsInfo info = new(absoluteOutputFolder, outputFolder, uxmlName, Array.Empty<string>());
                 using FigmaDownloader downloader = new(PersonalAccessToken, fileKey, info);
 
-                await downloader.Run(downloadImages, uxmlName, selectedPaths, true, progress, importCts.Token);
+                await downloader.Run(downloadImages, uxmlName, selectedPaths, generateRootDocument, progress, importCts.Token);
                 downloader.CleanUp(downloadImages);
-                downloader.RemoveEmptyDirectories();
+                if (generateRootDocument)
+                    downloader.RemoveEmptyDirectories();
 
                 stopwatch.Stop();
                 float seconds = (float)stopwatch.ElapsedMilliseconds / 1000;

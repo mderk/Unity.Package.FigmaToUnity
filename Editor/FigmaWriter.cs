@@ -80,14 +80,6 @@ namespace Figma
             foreach (CanvasNode canvasNode in rootNodes.Canvases)
                 framesPaths.TryAdd(canvasNode.name, new List<string>());
 
-            UnityEngine.Debug.Log($"[FigmaImport] WriteAsync: {rootNodes.Frames.Count} frames, {rootNodes.ComponentSets.Count} componentSets, {rootNodes.Elements.Count} elements, {rootNodes.Canvases.Count} canvases");
-            UnityEngine.Debug.Log($"[FigmaImport] SelectedRoots: {string.Join(", ", nodeMetadata.SelectedRoots.Select(r => $"{r.name} [{r.GetType().Name}]"))}");
-            // Debug: log canvas children
-            foreach (var canvas in rootNodes.Canvases)
-            {
-                if (canvas is Internals.IChildrenMixin cm && cm.children != null && cm.children.Length > 0)
-                    UnityEngine.Debug.Log($"[FigmaImport]   Canvas '{canvas.name}': {cm.children.Length} children — {string.Join(", ", cm.children.Take(5).Select(c => $"{c.name}[{c.GetType().Name}]"))}");
-            }
             List<Task> tasks = new(rootNodes.Frames.Count + rootNodes.ComponentSets.Count + rootNodes.Elements.Count);
             tasks.AddRange(rootNodes.Frames.Select(x => Task.Run(() => WriteFrame(uxmlBuilder, framesPaths, componentSets, x))));
             tasks.AddRange(rootNodes.ComponentSets.Select(x => Task.Run(() => WriteComponentSet(uxmlBuilder, x))));
@@ -102,7 +94,7 @@ namespace Figma
         #endregion
 
         #region Support Methods
-        void WriteFrame(UxmlBuilder uxmlBuilder, Dictionary<string, IReadOnlyList<string>> framesPaths, Dictionary<string, ComponentSetNode> componentSets, FrameNode frameNode)
+        void WriteFrame(UxmlBuilder uxmlBuilder, Dictionary<string, IReadOnlyList<string>> framesPaths, Dictionary<string, ComponentSetNode> componentSets, DefaultFrameNode frameNode)
         {
             Dictionary<string, string> templates = new();
 
