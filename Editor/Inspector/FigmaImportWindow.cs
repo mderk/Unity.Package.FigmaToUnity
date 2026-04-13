@@ -52,6 +52,7 @@ namespace Figma.Inspectors
         string fetchProgressLabel;
         Stopwatch fetchStopwatch;
         CancellationTokenSource fetchCts;
+        CancellationTokenSource importCts;
 
         List<FrameInfo> frames = new();
         List<RecentFile> recentFiles = new();
@@ -329,12 +330,7 @@ namespace Figma.Inspectors
 
             EditorGUILayout.Space(4);
 
-            // Import progress inline
-            if (importing && importProgressLabel.NotNullOrEmpty())
-            {
-                EditorGUILayout.HelpBox(importProgressLabel, MessageType.None);
-                EditorGUILayout.Space(2);
-            }
+
 
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -429,13 +425,24 @@ namespace Figma.Inspectors
 
             EditorGUILayout.Space(4);
 
-            using (new EditorGUI.DisabledScope(importing))
+            if (importing)
             {
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button(importing ? "Importing..." : "Import", GUILayout.Height(28)))
+                    Rect r = EditorGUILayout.GetControlRect(false, 28);
+                    EditorGUI.ProgressBar(r, -1f, importProgressLabel ?? "Importing...");
+
+                    if (GUILayout.Button("Cancel", GUILayout.Height(28), GUILayout.Width(60)))
+                        importCts?.Cancel();
+                }
+            }
+            else
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("Import", GUILayout.Height(28)))
                         RunImport(false);
-                    if (GUILayout.Button(importing ? "Importing..." : "Import with Images", GUILayout.Height(28)))
+                    if (GUILayout.Button("Import with Images", GUILayout.Height(28)))
                         RunImport(true);
                 }
             }
@@ -739,8 +746,8 @@ namespace Figma.Inspectors
 
                     SetStatus($"Fetched {frames.Count} frames from {data.document.children.Length} pages in {fetchStopwatch.Elapsed.TotalSeconds:F1}s.", MessageType.Info);
 
-                    // Fetch thumbnails in background
-                    FetchThumbnails(fetchCts.Token);
+                    // Fetch thumbnails in background (disabled)
+                    // FetchThumbnails(fetchCts.Token);
                 }
                 finally
                 {
@@ -800,13 +807,13 @@ namespace Figma.Inspectors
 
             EditorApplication.update += PollProgress;
 
-            using CancellationTokenSource cts = new();
+            importCts = new CancellationTokenSource();
 
             try
             {
                 Progress.RegisterCancelCallback(progress, () =>
                 {
-                    cts.Cancel();
+                    importCts?.Cancel();
                     return true;
                 });
 
@@ -815,7 +822,7 @@ namespace Figma.Inspectors
                 AssetsInfo info = new(absoluteOutputFolder, outputFolder, uxmlName, Array.Empty<string>());
                 using FigmaDownloader downloader = new(PersonalAccessToken, fileKey, info);
 
-                await downloader.Run(downloadImages, uxmlName, selectedPaths, true, progress, cts.Token);
+                await downloader.Run(downloadImages, uxmlName, selectedPaths, true, progress, importCts.Token);
                 downloader.CleanUp(downloadImages);
                 downloader.RemoveEmptyDirectories();
 
@@ -848,6 +855,8 @@ namespace Figma.Inspectors
                 AssetDatabase.Refresh();
                 importing = false;
                 importProgressLabel = null;
+                importCts?.Dispose();
+                importCts = null;
                 Repaint();
             }
         }
