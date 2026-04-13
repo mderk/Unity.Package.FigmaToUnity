@@ -46,6 +46,8 @@ namespace Figma.Inspectors
         MessageType statusType;
 
         string importProgressLabel;
+        string fetchProgressLabel;
+        Stopwatch fetchStopwatch;
 
         List<FrameInfo> frames = new();
         List<RecentFile> recentFiles = new();
@@ -220,6 +222,10 @@ namespace Figma.Inspectors
                     }
                 }
             }
+
+            // Fetch progress
+            if (fetching && fetchProgressLabel.NotNullOrEmpty())
+                EditorGUILayout.LabelField(fetchProgressLabel, EditorStyles.miniLabel);
 
             // Fetch / Refresh buttons
             using (new EditorGUILayout.HorizontalScope())
@@ -544,22 +550,47 @@ namespace Figma.Inspectors
                     return;
                 }
 
-                using FigmaDownloader downloader = new(PersonalAccessToken, fileKey,
-                    new AssetsInfo(Application.dataPath, "Assets", "temp", Array.Empty<string>()));
+                fetchStopwatch = Stopwatch.StartNew();
 
-                string json = await downloader.FetchShallowAsync(CancellationToken.None);
+                void PollFetch()
+                {
+                    if (!fetching) return;
+                    fetchProgressLabel = $"Downloading document structure... {fetchStopwatch.Elapsed.TotalSeconds:F0}s";
+                    Repaint();
+                }
 
-                Data data = await Task.Run(() => JsonUtility.FromJson<Data>(json));
-                PopulateFrames(data);
+                EditorApplication.update += PollFetch;
 
-                documentName = data.name;
-                cacheDate = DateTime.UtcNow;
+                try
+                {
+                    fetchProgressLabel = "Connecting to Figma API...";
+                    Repaint();
 
-                SaveToDiskCache(fileKey, json, documentName);
-                AddRecentFile(fileKey, documentName);
-                RestoreSelectedFrames();
+                    using FigmaDownloader downloader = new(PersonalAccessToken, fileKey,
+                        new AssetsInfo(Application.dataPath, "Assets", "temp", Array.Empty<string>()));
 
-                SetStatus($"Fetched {frames.Count} frames from {data.document.children.Length} pages.", MessageType.Info);
+                    string json = await downloader.FetchShallowAsync(CancellationToken.None);
+
+                    fetchProgressLabel = "Parsing response...";
+                    Repaint();
+
+                    Data data = await Task.Run(() => JsonUtility.FromJson<Data>(json));
+                    PopulateFrames(data);
+
+                    documentName = data.name;
+                    cacheDate = DateTime.UtcNow;
+
+                    SaveToDiskCache(fileKey, json, documentName);
+                    AddRecentFile(fileKey, documentName);
+                    RestoreSelectedFrames();
+
+                    SetStatus($"Fetched {frames.Count} frames from {data.document.children.Length} pages in {fetchStopwatch.Elapsed.TotalSeconds:F1}s.", MessageType.Info);
+                }
+                finally
+                {
+                    EditorApplication.update -= PollFetch;
+                    fetchStopwatch.Stop();
+                }
             }
             catch (Exception e)
             {
@@ -569,6 +600,8 @@ namespace Figma.Inspectors
             finally
             {
                 fetching = false;
+                fetchProgressLabel = null;
+                fetchStopwatch = null;
                 Repaint();
             }
         }
