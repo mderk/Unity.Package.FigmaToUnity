@@ -59,6 +59,7 @@ namespace Figma.Inspectors
         Vector2 scrollPosition;
         string searchBar = "";
         bool thumbnailsLoading;
+        readonly List<(FrameInfo frame, string pageName)> visibleRows = new();
         #endregion
 
         #region Types
@@ -359,24 +360,50 @@ namespace Figma.Inspectors
             bool hasThumbnails = frames.Any(f => f.thumbnail != null);
             float rowHeight = hasThumbnails ? thumbnailHeight + 4 : EditorGUIUtility.singleLineHeight + 2;
 
-            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+            // Build visible rows: interleave page headers and frames
+            bool hasSearch = !string.IsNullOrWhiteSpace(searchBar);
+            string searchLower = hasSearch ? searchBar.ToLower() : null;
+            visibleRows.Clear();
 
             string currentPage = null;
             foreach (FrameInfo frame in frames)
             {
-                if (!string.IsNullOrWhiteSpace(searchBar) && !frame.path.ToLower().Contains(searchBar.ToLower()))
+                if (hasSearch && !frame.path.ToLower().Contains(searchLower))
                     continue;
 
                 if (frame.pageName != currentPage)
                 {
                     currentPage = frame.pageName;
+                    visibleRows.Add((null, currentPage));
+                }
+                visibleRows.Add((frame, null));
+            }
 
-                    // Page header with select/deselect
-                    using (new EditorGUILayout.HorizontalScope())
+            int totalRows = visibleRows.Count;
+            float totalHeight = totalRows * rowHeight;
+
+            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+
+            // Reserve full height, draw only visible range
+            int firstVisible = Mathf.Max(0, Mathf.FloorToInt(scrollPosition.y / rowHeight) - 1);
+            int visibleCount = Mathf.CeilToInt(EditorGUIUtility.currentViewWidth > 0 ? Screen.height / rowHeight : 30) + 3;
+            int lastVisible = Mathf.Min(totalRows, firstVisible + visibleCount);
+
+            if (firstVisible > 0)
+                GUILayout.Space(firstVisible * rowHeight);
+
+            for (int i = firstVisible; i < lastVisible; i++)
+            {
+                (FrameInfo frame, string pageName) = visibleRows[i];
+
+                if (frame == null)
+                {
+                    // Page header
+                    using (new EditorGUILayout.HorizontalScope(GUILayout.Height(rowHeight)))
                     {
-                        EditorGUILayout.LabelField(currentPage, EditorStyles.miniLabel);
+                        EditorGUILayout.LabelField(pageName, EditorStyles.miniLabel);
 
-                        string page = currentPage;
+                        string page = pageName;
                         List<FrameInfo> pageFrames = frames.Where(f => f.pageName == page).ToList();
                         bool allSelected = pageFrames.All(f => f.selected);
 
@@ -388,32 +415,37 @@ namespace Figma.Inspectors
                         }
                     }
                 }
-
-                using (new EditorGUILayout.HorizontalScope(GUILayout.Height(rowHeight)))
+                else
                 {
-                    // Thumbnail
-                    if (hasThumbnails)
+                    using (new EditorGUILayout.HorizontalScope(GUILayout.Height(rowHeight)))
                     {
-                        if (frame.thumbnail != null)
+                        // Thumbnail
+                        if (hasThumbnails)
                         {
-                            float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
-                            float thumbWidth = thumbnailHeight * aspect;
-                            UnityEngine.Rect thumbRect = GUILayoutUtility.GetRect(thumbWidth, thumbnailHeight, GUILayout.Width(thumbWidth), GUILayout.Height(thumbnailHeight));
-                            GUI.DrawTexture(thumbRect, frame.thumbnail, UnityEngine.ScaleMode.ScaleToFit);
+                            if (frame.thumbnail != null)
+                            {
+                                float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
+                                float thumbWidth = thumbnailHeight * aspect;
+                                UnityEngine.Rect thumbRect = GUILayoutUtility.GetRect(thumbWidth, thumbnailHeight, GUILayout.Width(thumbWidth), GUILayout.Height(thumbnailHeight));
+                                GUI.DrawTexture(thumbRect, frame.thumbnail, UnityEngine.ScaleMode.ScaleToFit);
+                            }
+                            else
+                            {
+                                GUILayout.Space(thumbnailHeight);
+                            }
                         }
-                        else
-                        {
-                            GUILayout.Space(thumbnailHeight);
-                        }
-                    }
 
-                    // Checkbox
-                    EditorGUI.BeginChangeCheck();
-                    frame.selected = EditorGUILayout.ToggleLeft(frame.frameName, frame.selected);
-                    if (EditorGUI.EndChangeCheck())
-                        SaveSelectedFrames();
+                        // Checkbox
+                        EditorGUI.BeginChangeCheck();
+                        frame.selected = EditorGUILayout.ToggleLeft(frame.frameName, frame.selected);
+                        if (EditorGUI.EndChangeCheck())
+                            SaveSelectedFrames();
+                    }
                 }
             }
+
+            if (lastVisible < totalRows)
+                GUILayout.Space((totalRows - lastVisible) * rowHeight);
 
             EditorGUILayout.EndScrollView();
         }
