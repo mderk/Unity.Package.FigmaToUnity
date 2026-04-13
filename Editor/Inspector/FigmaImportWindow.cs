@@ -59,6 +59,7 @@ namespace Figma.Inspectors
         Vector2 scrollPosition;
         string searchBar = "";
         bool thumbnailsLoading;
+        UnityEngine.Rect cachedSpaceRect;
         readonly List<(FrameInfo frame, string pageName)> visibleRows = new();
         #endregion
 
@@ -388,89 +389,95 @@ namespace Figma.Inspectors
                 : 0;
             float totalHeight = selectedSectionHeight + totalRows * rowHeight;
 
-            UnityEngine.Rect viewRect = GUILayoutUtility.GetRect(0, 10000, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
-            UnityEngine.Rect contentRect = new(0, 0, viewRect.width - 14, totalHeight);
-            scrollPosition = GUI.BeginScrollView(viewRect, scrollPosition, contentRect);
-
-            float yOffset = 0;
+            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
 
             // --- Selected frames ---
             if (selectedFrames.Count > 0)
             {
-                EditorGUI.LabelField(new UnityEngine.Rect(0, yOffset, contentRect.width, EditorGUIUtility.singleLineHeight), $"Selected ({selectedFrames.Count})", EditorStyles.miniLabel);
-                yOffset += EditorGUIUtility.singleLineHeight + 2;
-
+                EditorGUILayout.LabelField($"Selected ({selectedFrames.Count})", EditorStyles.miniLabel);
                 foreach (FrameInfo sf in selectedFrames)
                 {
-                    UnityEngine.Rect labelRect = new(0, yOffset, contentRect.width - 24, EditorGUIUtility.singleLineHeight);
-                    EditorGUI.LabelField(labelRect, sf.path, EditorStyles.miniLabel);
-                    UnityEngine.Rect btnRect = new(contentRect.width - 20, yOffset, 20, EditorGUIUtility.singleLineHeight);
-                    if (GUI.Button(btnRect, "x", EditorStyles.miniButton))
+                    using (new EditorGUILayout.HorizontalScope())
                     {
-                        sf.selected = false;
-                        SaveSelectedFrames();
+                        EditorGUILayout.LabelField(sf.path, EditorStyles.miniLabel);
+                        if (GUILayout.Button("x", EditorStyles.miniButton, GUILayout.Width(20)))
+                        {
+                            sf.selected = false;
+                            SaveSelectedFrames();
+                        }
                     }
-                    yOffset += EditorGUIUtility.singleLineHeight + 2;
                 }
 
                 // Separator
-                yOffset += 3;
-                EditorGUI.DrawRect(new UnityEngine.Rect(0, yOffset, contentRect.width, 1), new Color(0.3f, 0.3f, 0.3f, 1f));
-                yOffset += 4;
-
-                EditorGUI.LabelField(new UnityEngine.Rect(0, yOffset, contentRect.width, EditorGUIUtility.singleLineHeight), "All Frames", EditorStyles.miniLabel);
-                yOffset += EditorGUIUtility.singleLineHeight + 2;
+                EditorGUILayout.Space(2);
+                UnityEngine.Rect sepRect = EditorGUILayout.GetControlRect(false, 1);
+                EditorGUI.DrawRect(sepRect, new Color(0.3f, 0.3f, 0.3f, 1f));
+                EditorGUILayout.Space(2);
+                EditorGUILayout.LabelField("All Frames", EditorStyles.miniLabel);
             }
 
-            // --- All frames (virtualized) ---
-            float allFramesStartY = yOffset;
-            int firstVisible = Mathf.Max(0, Mathf.FloorToInt((scrollPosition.y - allFramesStartY) / rowHeight));
-            int lastVisible = Mathf.Min(totalRows, Mathf.CeilToInt((scrollPosition.y - allFramesStartY + viewRect.height) / rowHeight) + 1);
+            // --- All frames (virtualized via GUILayout.Space + manual Rect) ---
+            float allFramesHeight = totalRows * rowHeight;
+            GUILayout.Space(allFramesHeight);
+            UnityEngine.Rect spaceRect = GUILayoutUtility.GetLastRect();
 
-            for (int i = firstVisible; i < lastVisible; i++)
+            if (Event.current.type == EventType.Repaint)
+                cachedSpaceRect = spaceRect;
+
+            if (cachedSpaceRect.width > 1)
             {
-                UnityEngine.Rect rowRect = new(0, allFramesStartY + i * rowHeight, contentRect.width, rowHeight);
-                (FrameInfo frame, string pageName) = visibleRows[i];
+                int firstVisible = Mathf.Max(0, Mathf.FloorToInt((scrollPosition.y - cachedSpaceRect.y) / rowHeight));
+                int lastVisible = Mathf.Min(totalRows, Mathf.CeilToInt((scrollPosition.y - cachedSpaceRect.y + position.height) / rowHeight) + 1);
 
-                if (frame == null)
+                for (int i = firstVisible; i < lastVisible; i++)
                 {
-                    UnityEngine.Rect labelRect = new(rowRect.x, rowRect.y, rowRect.width - 36, rowRect.height);
-                    EditorGUI.LabelField(labelRect, pageName, EditorStyles.miniLabel);
+                    UnityEngine.Rect rowRect = new(cachedSpaceRect.x, cachedSpaceRect.y + i * rowHeight, cachedSpaceRect.width, rowHeight);
+                    (FrameInfo frame, string pageName) = visibleRows[i];
 
-                    UnityEngine.Rect btnRect = new(rowRect.xMax - 34, rowRect.y, 32, rowRect.height);
-                    string page = pageName;
-                    List<FrameInfo> pageFrames = frames.Where(f => f.pageName == page).ToList();
-                    bool allSelected = pageFrames.All(f => f.selected);
-
-                    if (GUI.Button(btnRect, allSelected ? "none" : "all", EditorStyles.miniButton))
+                    if (frame == null)
                     {
-                        bool newState = !allSelected;
-                        pageFrames.ForEach(f => f.selected = newState);
-                        SaveSelectedFrames();
-                    }
-                }
-                else
-                {
-                    float xOffset = rowRect.x;
+                        UnityEngine.Rect labelRect = new(rowRect.x, rowRect.y, rowRect.width - 36, rowRect.height);
+                        EditorGUI.LabelField(labelRect, pageName, EditorStyles.miniLabel);
 
-                    if (hasThumbnails && frame.thumbnail != null)
+                        UnityEngine.Rect btnRect = new(rowRect.xMax - 34, rowRect.y, 32, rowRect.height);
+                        string page = pageName;
+                        List<FrameInfo> pageFrames = frames.Where(f => f.pageName == page).ToList();
+                        bool allSelected = pageFrames.All(f => f.selected);
+
+                        if (GUI.Button(btnRect, allSelected ? "none" : "all", EditorStyles.miniButton))
+                        {
+                            bool newState = !allSelected;
+                            pageFrames.ForEach(f => f.selected = newState);
+                            SaveSelectedFrames();
+                        }
+                    }
+                    else
                     {
-                        float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
-                        float thumbWidth = thumbnailHeight * aspect;
-                        UnityEngine.Rect thumbRect = new(xOffset, rowRect.y, thumbWidth, thumbnailHeight);
-                        GUI.DrawTexture(thumbRect, frame.thumbnail, UnityEngine.ScaleMode.ScaleToFit);
-                        xOffset += thumbWidth + 4;
-                    }
+                        float xOffset = rowRect.x;
 
-                    UnityEngine.Rect toggleRect = new(xOffset, rowRect.y, rowRect.xMax - xOffset, rowRect.height);
-                    EditorGUI.BeginChangeCheck();
-                    frame.selected = EditorGUI.ToggleLeft(toggleRect, frame.frameName, frame.selected);
-                    if (EditorGUI.EndChangeCheck())
-                        SaveSelectedFrames();
+                        if (hasThumbnails && frame.thumbnail != null)
+                        {
+                            float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
+                            float thumbWidth = thumbnailHeight * aspect;
+                            UnityEngine.Rect thumbRect = new(xOffset, rowRect.y, thumbWidth, thumbnailHeight);
+                            GUI.DrawTexture(thumbRect, frame.thumbnail, UnityEngine.ScaleMode.ScaleToFit);
+                            xOffset += thumbWidth + 4;
+                        }
+
+                        UnityEngine.Rect toggleRect = new(xOffset, rowRect.y, rowRect.xMax - xOffset, rowRect.height);
+                        EditorGUI.BeginChangeCheck();
+                        frame.selected = EditorGUI.ToggleLeft(toggleRect, frame.frameName, frame.selected);
+                        if (EditorGUI.EndChangeCheck())
+                            SaveSelectedFrames();
+                    }
                 }
             }
+            else
+            {
+                Repaint();
+            }
 
-            GUI.EndScrollView();
+            EditorGUILayout.EndScrollView();
         }
 
         void DrawImportButtons()
