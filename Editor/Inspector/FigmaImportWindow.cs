@@ -60,7 +60,6 @@ namespace Figma.Inspectors
         string searchBar = "";
         bool thumbnailsLoading;
         Vector2 selectedScrollPosition;
-        UnityEngine.Rect cachedScrollRect;
         readonly List<(FrameInfo frame, string pageName)> visibleRows = new();
         #endregion
 
@@ -407,20 +406,17 @@ namespace Figma.Inspectors
             int totalRows = visibleRows.Count;
             float totalHeight = totalRows * rowHeight;
 
-            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
-
-            // Reserve total height with a single Space, then draw visible rows via manual Rect
-            GUILayout.Space(totalHeight);
-            if (Event.current.type == EventType.Repaint)
-                cachedScrollRect = GUILayoutUtility.GetLastRect();
+            // Use GUILayoutUtility to get the remaining area, then manual scroll view
+            UnityEngine.Rect viewRect = GUILayoutUtility.GetRect(0, 10000, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
+            UnityEngine.Rect contentRect = new(0, 0, viewRect.width - 14, totalHeight);
+            scrollPosition = GUI.BeginScrollView(viewRect, scrollPosition, contentRect);
 
             int firstVisible = Mathf.Max(0, Mathf.FloorToInt(scrollPosition.y / rowHeight));
-            float viewHeight = position.height;
-            int lastVisible = Mathf.Min(totalRows, Mathf.CeilToInt((scrollPosition.y + viewHeight) / rowHeight) + 1);
+            int lastVisible = Mathf.Min(totalRows, Mathf.CeilToInt((scrollPosition.y + viewRect.height) / rowHeight) + 1);
 
             for (int i = firstVisible; i < lastVisible; i++)
             {
-                UnityEngine.Rect rowRect = new(cachedScrollRect.x, cachedScrollRect.y + i * rowHeight, cachedScrollRect.width, rowHeight);
+                UnityEngine.Rect rowRect = new(0, i * rowHeight, contentRect.width, rowHeight);
                 (FrameInfo frame, string pageName) = visibleRows[i];
 
                 if (frame == null)
@@ -464,7 +460,7 @@ namespace Figma.Inspectors
                 }
             }
 
-            EditorGUILayout.EndScrollView();
+            GUI.EndScrollView();
         }
 
         void DrawImportButtons()
