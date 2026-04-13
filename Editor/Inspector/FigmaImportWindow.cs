@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,10 +26,12 @@ namespace Figma.Inspectors
         const string recentKeysPrefKey = "Figma/ImportWindow/RecentKeys";
         const string selectedFramesPrefKey = "Figma/ImportWindow/SelectedFrames/";
         const int maxRecentKeys = 10;
+        const int thumbnailHeight = 48;
 
         static readonly Regex figmaUrlPattern = new(@"figma\.com/(?:file|design)/([a-zA-Z0-9]+)", RegexOptions.Compiled);
 
         static string CacheDirectory => Path.Combine(Directory.GetCurrentDirectory(), "Library", "FigmaCache");
+        static string ThumbnailCacheDirectory => Path.Combine(CacheDirectory, "thumbnails");
         #endregion
 
         #region Fields
@@ -54,15 +57,18 @@ namespace Figma.Inspectors
         List<RecentFile> recentFiles = new();
         Vector2 scrollPosition;
         string searchBar = "";
+        bool thumbnailsLoading;
         #endregion
 
         #region Types
         class FrameInfo
         {
+            public string nodeId;
             public string pageName;
             public string frameName;
             public string path;
             public bool selected;
+            public Texture2D thumbnail;
         }
 
         [Serializable]
@@ -105,11 +111,18 @@ namespace Figma.Inspectors
             outputFolder = EditorPrefs.GetString(outputFolderPrefKey, "Assets/FigmaImport");
             LoadRecentFiles();
 
-            if (fileKey.NotNullOrEmpty())
+            if (fileKey.NotNullOrEmpty() && TryLoadFromDiskCache(fileKey))
             {
-                TryLoadFromDiskCache(fileKey);
                 RestoreSelectedFrames();
+                LoadCachedThumbnails();
             }
+        }
+
+        void OnDisable()
+        {
+            foreach (FrameInfo frame in frames)
+                if (frame.thumbnail != null)
+                    DestroyImmediate(frame.thumbnail);
         }
 
         void OnGUI()
@@ -184,6 +197,7 @@ namespace Figma.Inspectors
                     EditorPrefs.SetString(fileKeyPrefKey, fileKey);
                     TryLoadFromDiskCache(fileKey);
                     RestoreSelectedFrames();
+                    LoadCachedThumbnails();
                 }
 
                 if (recentFiles.Count > 0)
@@ -201,6 +215,7 @@ namespace Figma.Inspectors
                                 EditorPrefs.SetString(fileKeyPrefKey, fileKey);
                                 TryLoadFromDiskCache(fileKey);
                                 RestoreSelectedFrames();
+                                LoadCachedThumbnails();
                                 Repaint();
                             });
                         }
@@ -307,7 +322,7 @@ namespace Figma.Inspectors
         {
             if (frames.Count == 0)
             {
-                if (statusMessage.NullOrEmpty())
+                if (!fetching && statusMessage.NullOrEmpty())
                     EditorGUILayout.HelpBox("Click 'Fetch Pages' to load the document structure from Figma.", MessageType.Info);
                 return;
             }
@@ -321,7 +336,13 @@ namespace Figma.Inspectors
                 EditorGUILayout.Space(2);
             }
 
-            EditorGUILayout.LabelField($"Frames ({frames.Count(f => f.selected)}/{frames.Count} selected)", EditorStyles.boldLabel);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField($"Frames ({frames.Count(f => f.selected)}/{frames.Count} selected)", EditorStyles.boldLabel);
+
+                if (thumbnailsLoading)
+                    EditorGUILayout.LabelField("loading thumbnails...", EditorStyles.miniLabel, GUILayout.Width(120));
+            }
 
             searchBar = EditorGUILayout.TextField(searchBar, EditorStyles.toolbarSearchField);
 
@@ -338,6 +359,9 @@ namespace Figma.Inspectors
                     SaveSelectedFrames();
                 }
             }
+
+            bool hasThumbnails = frames.Any(f => f.thumbnail != null);
+            float rowHeight = hasThumbnails ? thumbnailHeight + 4 : EditorGUIUtility.singleLineHeight + 2;
 
             scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
 
@@ -369,10 +393,30 @@ namespace Figma.Inspectors
                     }
                 }
 
-                EditorGUI.BeginChangeCheck();
-                frame.selected = EditorGUILayout.ToggleLeft($"  {frame.frameName}", frame.selected);
-                if (EditorGUI.EndChangeCheck())
-                    SaveSelectedFrames();
+                using (new EditorGUILayout.HorizontalScope(GUILayout.Height(rowHeight)))
+                {
+                    // Thumbnail
+                    if (hasThumbnails)
+                    {
+                        if (frame.thumbnail != null)
+                        {
+                            float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
+                            float thumbWidth = thumbnailHeight * aspect;
+                            Rect thumbRect = GUILayoutUtility.GetRect(thumbWidth, thumbnailHeight, GUILayout.Width(thumbWidth), GUILayout.Height(thumbnailHeight));
+                            GUI.DrawTexture(thumbRect, frame.thumbnail, ScaleMode.ScaleToFit);
+                        }
+                        else
+                        {
+                            GUILayout.Space(thumbnailHeight);
+                        }
+                    }
+
+                    // Checkbox
+                    EditorGUI.BeginChangeCheck();
+                    frame.selected = EditorGUILayout.ToggleLeft(frame.frameName, frame.selected);
+                    if (EditorGUI.EndChangeCheck())
+                        SaveSelectedFrames();
+                }
             }
 
             EditorGUILayout.EndScrollView();
@@ -475,6 +519,97 @@ namespace Figma.Inspectors
         }
         #endregion
 
+        #region Thumbnails
+        static string GetThumbnailPath(string fKey, string nodeId) =>
+            Path.Combine(ThumbnailCacheDirectory, fKey, $"{nodeId.Replace(":", "_")}.png");
+
+        void LoadCachedThumbnails()
+        {
+            foreach (FrameInfo frame in frames)
+            {
+                if (frame.thumbnail != null)
+                    DestroyImmediate(frame.thumbnail);
+                frame.thumbnail = null;
+
+                string thumbPath = GetThumbnailPath(fileKey, frame.nodeId);
+                if (!File.Exists(thumbPath)) continue;
+
+                byte[] bytes = File.ReadAllBytes(thumbPath);
+                Texture2D tex = new(2, 2) { filterMode = FilterMode.Bilinear };
+                if (tex.LoadImage(bytes))
+                    frame.thumbnail = tex;
+                else
+                    DestroyImmediate(tex);
+            }
+            Repaint();
+        }
+
+        // ReSharper disable once AsyncVoidMethod
+        async void FetchThumbnails(CancellationToken token)
+        {
+            if (frames.Count == 0 || fileKey.NullOrEmpty()) return;
+
+            // Only fetch thumbnails that aren't cached
+            List<FrameInfo> missing = frames.Where(f => f.thumbnail == null && f.nodeId.NotNullOrEmpty()).ToList();
+            if (missing.Count == 0) return;
+
+            thumbnailsLoading = true;
+            Repaint();
+
+            try
+            {
+                using FigmaDownloader downloader = new(PersonalAccessToken, fileKey,
+                    new AssetsInfo(Application.dataPath, "Assets", "temp", Array.Empty<string>()));
+
+                Dictionary<string, string> urls = await downloader.FetchThumbnailsAsync(
+                    missing.Select(f => f.nodeId), token);
+
+                Directory.CreateDirectory(Path.Combine(ThumbnailCacheDirectory, fileKey));
+
+                using HttpClient http = new();
+
+                foreach (FrameInfo frame in missing)
+                {
+                    if (token.IsCancellationRequested) break;
+                    if (!urls.TryGetValue(frame.nodeId, out string url) || string.IsNullOrEmpty(url)) continue;
+
+                    try
+                    {
+                        byte[] bytes = await http.GetByteArrayAsync(url);
+                        if (bytes.Length == 0) continue;
+
+                        // Save to disk cache
+                        string thumbPath = GetThumbnailPath(fileKey, frame.nodeId);
+                        await File.WriteAllBytesAsync(thumbPath, bytes, token);
+
+                        // Load into texture
+                        Texture2D tex = new(2, 2) { filterMode = FilterMode.Bilinear };
+                        if (tex.LoadImage(bytes))
+                            frame.thumbnail = tex;
+                        else
+                            DestroyImmediate(tex);
+
+                        Repaint();
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogWarning($"[FigmaImport] Thumbnail failed for {frame.nodeId}: {e.Message}");
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[FigmaImport] Thumbnail fetch failed: {e.Message}");
+            }
+            finally
+            {
+                thumbnailsLoading = false;
+                Repaint();
+            }
+        }
+        #endregion
+
         #region Selected Frames Persistence
         void SaveSelectedFrames()
         {
@@ -524,6 +659,10 @@ namespace Figma.Inspectors
 
         void PopulateFrames(Data data)
         {
+            foreach (FrameInfo frame in frames)
+                if (frame.thumbnail != null)
+                    DestroyImmediate(frame.thumbnail);
+
             frames.Clear();
             foreach (CanvasNode page in data.document.children)
             {
@@ -532,6 +671,7 @@ namespace Figma.Inspectors
                 {
                     frames.Add(new FrameInfo
                     {
+                        nodeId = frame.id,
                         pageName = page.name,
                         frameName = frame.name,
                         path = $"{page.name}/{frame.name}",
@@ -552,6 +692,7 @@ namespace Figma.Inspectors
                 if (!forceRefresh && TryLoadFromDiskCache(fileKey))
                 {
                     RestoreSelectedFrames();
+                    LoadCachedThumbnails();
                     fetching = false;
                     Repaint();
                     return;
@@ -597,6 +738,9 @@ namespace Figma.Inspectors
                     RestoreSelectedFrames();
 
                     SetStatus($"Fetched {frames.Count} frames from {data.document.children.Length} pages in {fetchStopwatch.Elapsed.TotalSeconds:F1}s.", MessageType.Info);
+
+                    // Fetch thumbnails in background
+                    FetchThumbnails(fetchCts.Token);
                 }
                 finally
                 {

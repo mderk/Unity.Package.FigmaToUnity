@@ -53,6 +53,21 @@ namespace Figma
         }
 
         /// <summary>
+        /// Fetch thumbnail URLs for given node IDs.
+        /// </summary>
+        internal async Task<Dictionary<string, string>> FetchThumbnailsAsync(IEnumerable<string> nodeIds, CancellationToken token, Action<string> progress = null)
+        {
+            onProgress = progress;
+            try
+            {
+                string ids = string.Join(",", nodeIds);
+                Images result = await GetAsync<Images>($"images/{fileKey}?ids={ids}&format=png&scale=0.1", token);
+                return result?.images ?? new Dictionary<string, string>();
+            }
+            finally { onProgress = null; }
+        }
+
+        /// <summary>
         /// Run import using string frame paths (for EditorWindow workflow).
         /// </summary>
         internal async Task Run(bool downloadImages, string uxmlName, IReadOnlyList<string> framePaths, bool prune, int progress, CancellationToken token)
