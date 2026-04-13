@@ -15,6 +15,7 @@ namespace Figma
         #region Consts
         const int maxRetries = 3;
         const int defaultRetrySeconds = 10;
+    const int maxRetrySeconds = 30;
         #endregion
 
         #region Fields
@@ -52,8 +53,8 @@ namespace Figma
                 if (response.StatusCode == (HttpStatusCode)429 && attempt < maxRetries)
                 {
                     int retryAfter = defaultRetrySeconds;
-                    if (response.Headers.TryGetValues("Retry-After", out var values) && int.TryParse(values.First(), out int parsed))
-                        retryAfter = parsed;
+                    if (response.Headers.TryGetValues("Retry-After", out var values) && int.TryParse(values.First(), out int parsed) && parsed > 0)
+                        retryAfter = Math.Min(parsed, maxRetrySeconds);
 
                     Debug.LogWarning($"[FigmaToUnity] Rate limited. Retrying in {retryAfter}s (attempt {attempt + 1}/{maxRetries})...");
                     await Task.Delay(retryAfter * 1000, token);
