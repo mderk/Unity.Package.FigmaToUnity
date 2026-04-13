@@ -139,18 +139,26 @@ namespace Figma
                 throw new System.InvalidOperationException(Const.maximumDepthLimitReachedExceptionMessage);
             }
 
-            string rootDirectory = CombinePath(directory, framesDirectoryName, frameNode.parent.name);
+            // Find the canvas ancestor for folder grouping
+            IBaseNodeMixin ancestor = frameNode.parent;
+            while (ancestor != null && ancestor is not CanvasNode)
+                ancestor = ancestor.parent;
+            string canvasName = ancestor?.name ?? "Unknown";
+            string safeName = frameNode.name.Replace('/', '_');
+
+            string rootDirectory = CombinePath(directory, framesDirectoryName, canvasName);
 
             if (!Directory.Exists(rootDirectory))
                 Directory.CreateDirectory(rootDirectory);
 
-            using UssWriter ussWriter = new(directory, CombinePath(rootDirectory, $"{frameNode.name}.{KnownFormats.uss}"));
+            using UssWriter ussWriter = new(directory, CombinePath(rootDirectory, $"{safeName}.{KnownFormats.uss}"));
             ussWriter.Write(stylesPreprocessor.GetStyles(frameNode).IndexRedundantNames(x => x.Name, (style, postfix) => style.Name += postfix, index => "-" + (index + 1).NumberToWords()));
 
             FindTemplates(frameNode);
 
-            string uxmlPath = uxmlBuilder.CreateFrame(rootDirectory, new[] { ussPath, ussWriter.Path }, templates, frameNode);
-            framesPaths[frameNode.parent.name].As<List<string>>().Add(uxmlPath);
+            string uxmlPath = uxmlBuilder.CreateFrame(rootDirectory, new[] { ussPath, ussWriter.Path }, templates, frameNode, safeName);
+            if (framesPaths.ContainsKey(canvasName))
+                framesPaths[canvasName].As<List<string>>().Add(uxmlPath);
 
             assetsInfo.AddModifiedFiles(uxmlPath, ussWriter.Path);
             templates.Clear();

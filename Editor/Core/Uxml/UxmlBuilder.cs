@@ -67,9 +67,9 @@ namespace Figma.Core.Uxml
 
             writer.EndElement();
         }
-        public string CreateFrame(string directory, string[] ussStyleFilesPath, IReadOnlyDictionary<string, string> templates, DefaultFrameNode frameNode)
+        public string CreateFrame(string directory, string[] ussStyleFilesPath, IReadOnlyDictionary<string, string> templates, DefaultFrameNode frameNode, string overrideName = null)
         {
-            using UxmlWriter writer = new(directory, frameNode.name);
+            using UxmlWriter writer = new(directory, overrideName ?? frameNode.name);
 
             WriteStyles(ussStyleFilesPath, writer);
 

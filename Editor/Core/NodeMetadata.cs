@@ -167,6 +167,8 @@ namespace Figma
         #endregion
 
         #region Methods
+        internal IEnumerable<IBaseNodeMixin> SelectedRoots => rootMetadata.Keys;
+        internal bool IsSelectedRoot(IBaseNodeMixin node) => rootMetadata.ContainsKey(node);
         internal bool EnabledInHierarchy(IBaseNodeMixin node) => !rootMetadata.Any(x => x.Value.filter) || GetMetadata(node).root != null;
         internal bool ShouldDownload(IBaseNodeMixin node, UxmlDownloadImages flag)
         {

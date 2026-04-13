@@ -40,8 +40,9 @@ namespace Figma.Core
                         componentSets.Add(componentSetNode);
                         break;
 
-                    case FrameNode frameNode when node.parent is CanvasNode:
-                        frames.Add(frameNode);
+                    case FrameNode frameNode when node.parent is CanvasNode || nodeMetadata.IsSelectedRoot(node):
+                        if (!frames.Contains(frameNode))
+                            frames.Add(frameNode);
                         break;
 
                     case DefaultShapeNode defaultShapeNode when nodeMetadata.GetTemplate(defaultShapeNode) is (var isHash, { } template) && template.NotNullOrEmpty():
