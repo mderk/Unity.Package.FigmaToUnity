@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
@@ -22,7 +23,10 @@ namespace Figma.Inspectors
         const string fileKeyPrefKey = "Figma/ImportWindow/FileKey";
         const string outputFolderPrefKey = "Figma/ImportWindow/OutputFolder";
         const string recentKeysPrefKey = "Figma/ImportWindow/RecentKeys";
+        const string selectedFramesPrefKey = "Figma/ImportWindow/SelectedFrames/";
         const int maxRecentKeys = 10;
+
+        static readonly Regex figmaUrlPattern = new(@"figma\.com/(?:file|design)/([a-zA-Z0-9]+)", RegexOptions.Compiled);
 
         static string CacheDirectory => Path.Combine(Directory.GetCurrentDirectory(), "Library", "FigmaCache");
         #endregion
@@ -41,11 +45,12 @@ namespace Figma.Inspectors
         string statusMessage;
         MessageType statusType;
 
+        string importProgressLabel;
+
         List<FrameInfo> frames = new();
         List<RecentFile> recentFiles = new();
         Vector2 scrollPosition;
         string searchBar = "";
-        bool showRecent;
         #endregion
 
         #region Types
@@ -98,7 +103,10 @@ namespace Figma.Inspectors
             LoadRecentFiles();
 
             if (fileKey.NotNullOrEmpty())
+            {
                 TryLoadFromDiskCache(fileKey);
+                RestoreSelectedFrames();
+            }
         }
 
         void OnGUI()
@@ -169,8 +177,10 @@ namespace Figma.Inspectors
                 fileKey = EditorGUILayout.TextField("File Key", fileKey);
                 if (EditorGUI.EndChangeCheck())
                 {
+                    fileKey = ExtractFileKey(fileKey);
                     EditorPrefs.SetString(fileKeyPrefKey, fileKey);
                     TryLoadFromDiskCache(fileKey);
+                    RestoreSelectedFrames();
                 }
 
                 if (recentFiles.Count > 0)
@@ -187,6 +197,7 @@ namespace Figma.Inspectors
                                 fileKey = key;
                                 EditorPrefs.SetString(fileKeyPrefKey, fileKey);
                                 TryLoadFromDiskCache(fileKey);
+                                RestoreSelectedFrames();
                                 Repaint();
                             });
                         }
@@ -263,6 +274,20 @@ namespace Figma.Inspectors
                 return;
 
             EditorGUILayout.HelpBox(statusMessage, statusType);
+
+            // Show "Open Output" button after successful import
+            if (statusType == MessageType.Info && statusMessage.Contains("Import completed"))
+            {
+                if (GUILayout.Button("Open Output Folder", GUILayout.Height(22)))
+                {
+                    UnityEngine.Object folder = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(outputFolder);
+                    if (folder != null)
+                    {
+                        EditorGUIUtility.PingObject(folder);
+                        Selection.activeObject = folder;
+                    }
+                }
+            }
         }
 
         void DrawFramesList()
@@ -275,6 +300,14 @@ namespace Figma.Inspectors
             }
 
             EditorGUILayout.Space(4);
+
+            // Import progress inline
+            if (importing && importProgressLabel.NotNullOrEmpty())
+            {
+                EditorGUILayout.HelpBox(importProgressLabel, MessageType.None);
+                EditorGUILayout.Space(2);
+            }
+
             EditorGUILayout.LabelField($"Frames ({frames.Count(f => f.selected)}/{frames.Count} selected)", EditorStyles.boldLabel);
 
             searchBar = EditorGUILayout.TextField(searchBar, EditorStyles.toolbarSearchField);
@@ -282,9 +315,15 @@ namespace Figma.Inspectors
             using (new EditorGUILayout.HorizontalScope())
             {
                 if (GUILayout.Button("Select All", GUILayout.Width(80)))
+                {
                     frames.ForEach(f => f.selected = true);
+                    SaveSelectedFrames();
+                }
                 if (GUILayout.Button("Select None", GUILayout.Width(80)))
+                {
                     frames.ForEach(f => f.selected = false);
+                    SaveSelectedFrames();
+                }
             }
 
             scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
@@ -298,10 +337,29 @@ namespace Figma.Inspectors
                 if (frame.pageName != currentPage)
                 {
                     currentPage = frame.pageName;
-                    EditorGUILayout.LabelField(currentPage, EditorStyles.miniLabel);
+
+                    // Page header with select/deselect
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        EditorGUILayout.LabelField(currentPage, EditorStyles.miniLabel);
+
+                        string page = currentPage;
+                        List<FrameInfo> pageFrames = frames.Where(f => f.pageName == page).ToList();
+                        bool allSelected = pageFrames.All(f => f.selected);
+
+                        if (GUILayout.Button(allSelected ? "none" : "all", EditorStyles.miniButton, GUILayout.Width(32)))
+                        {
+                            bool newState = !allSelected;
+                            pageFrames.ForEach(f => f.selected = newState);
+                            SaveSelectedFrames();
+                        }
+                    }
                 }
 
+                EditorGUI.BeginChangeCheck();
                 frame.selected = EditorGUILayout.ToggleLeft($"  {frame.frameName}", frame.selected);
+                if (EditorGUI.EndChangeCheck())
+                    SaveSelectedFrames();
             }
 
             EditorGUILayout.EndScrollView();
@@ -350,6 +408,13 @@ namespace Figma.Inspectors
             return $"{(int)age.TotalDays}d ago";
         }
 
+        static string ExtractFileKey(string input)
+        {
+            if (input == null) return input;
+            Match match = figmaUrlPattern.Match(input);
+            return match.Success ? match.Groups[1].Value : input;
+        }
+
         #region Disk Cache
         static string GetCachePath(string key) => Path.Combine(CacheDirectory, $"{key}.json");
 
@@ -365,6 +430,9 @@ namespace Figma.Inspectors
             frames.Clear();
             documentName = null;
             cacheDate = default;
+
+            if (key.NullOrEmpty())
+                return false;
 
             string path = GetCachePath(key);
             if (!File.Exists(path))
@@ -391,6 +459,26 @@ namespace Figma.Inspectors
                 Debug.LogWarning($"[FigmaImport] Failed to load cache: {e.Message}");
                 return false;
             }
+        }
+        #endregion
+
+        #region Selected Frames Persistence
+        void SaveSelectedFrames()
+        {
+            if (fileKey.NullOrEmpty()) return;
+            string selected = string.Join(";", frames.Where(f => f.selected).Select(f => f.path));
+            EditorPrefs.SetString(selectedFramesPrefKey + fileKey, selected);
+        }
+
+        void RestoreSelectedFrames()
+        {
+            if (fileKey.NullOrEmpty() || frames.Count == 0) return;
+            string raw = EditorPrefs.GetString(selectedFramesPrefKey + fileKey, "");
+            if (raw.NullOrEmpty()) return;
+
+            HashSet<string> selected = new(raw.Split(';'));
+            foreach (FrameInfo frame in frames)
+                frame.selected = selected.Contains(frame.path);
         }
         #endregion
 
@@ -448,10 +536,9 @@ namespace Figma.Inspectors
 
             try
             {
-                string json;
-
                 if (!forceRefresh && TryLoadFromDiskCache(fileKey))
                 {
+                    RestoreSelectedFrames();
                     fetching = false;
                     Repaint();
                     return;
@@ -460,7 +547,7 @@ namespace Figma.Inspectors
                 using FigmaDownloader downloader = new(PersonalAccessToken, fileKey,
                     new AssetsInfo(Application.dataPath, "Assets", "temp", Array.Empty<string>()));
 
-                json = await downloader.FetchShallowAsync(CancellationToken.None);
+                string json = await downloader.FetchShallowAsync(CancellationToken.None);
 
                 Data data = await Task.Run(() => JsonUtility.FromJson<Data>(json));
                 PopulateFrames(data);
@@ -470,6 +557,7 @@ namespace Figma.Inspectors
 
                 SaveToDiskCache(fileKey, json, documentName);
                 AddRecentFile(fileKey, documentName);
+                RestoreSelectedFrames();
 
                 SetStatus($"Fetched {frames.Count} frames from {data.document.children.Length} pages.", MessageType.Info);
             }
@@ -489,6 +577,7 @@ namespace Figma.Inspectors
         async void RunImport(bool downloadImages)
         {
             importing = true;
+            importProgressLabel = "Starting import...";
             ClearStatus();
 
             List<string> selectedPaths = frames.Where(f => f.selected).Select(f => f.path).ToList();
@@ -503,6 +592,18 @@ namespace Figma.Inspectors
             Stopwatch stopwatch = Stopwatch.StartNew();
             string display = $"Figma Import" + (downloadImages ? " (Images)" : "");
             int progress = Progress.Start(display, null, Progress.Options.Managed);
+
+            // Poll progress for inline display
+            void PollProgress()
+            {
+                if (!importing) return;
+                string desc = Progress.GetDescription(progress);
+                string step = Progress.GetStepLabel(progress);
+                importProgressLabel = desc.NotNullOrEmpty() ? desc : step.NotNullOrEmpty() ? step : importProgressLabel;
+                Repaint();
+            }
+
+            EditorApplication.update += PollProgress;
 
             using CancellationTokenSource cts = new();
 
@@ -545,11 +646,13 @@ namespace Figma.Inspectors
             }
             finally
             {
+                EditorApplication.update -= PollProgress;
                 Progress.UnregisterCancelCallback(progress);
                 stopwatch.Reset();
                 AssetDatabase.StopAssetEditing();
                 AssetDatabase.Refresh();
                 importing = false;
+                importProgressLabel = null;
                 Repaint();
             }
         }
