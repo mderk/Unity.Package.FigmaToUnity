@@ -138,8 +138,8 @@ namespace Figma.Inspectors
             DrawFileKeySection();
             DrawOutputSection();
             DrawStatusMessage();
-            DrawFramesList();
             DrawImportButtons();
+            DrawFramesList();
         }
 
         void DrawTokenSection()
