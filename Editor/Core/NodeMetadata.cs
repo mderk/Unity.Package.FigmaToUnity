@@ -149,6 +149,21 @@ namespace Figma
 
             elements.ForEach(InitializeRootElement);
         }
+
+        /// <summary>
+        /// Alternative constructor for EditorWindow workflow — accepts string paths instead of Element types.
+        /// </summary>
+        internal NodeMetadata(DocumentNode documentNode, IEnumerable<string> framePaths, bool filter, bool throwExceptions = true, bool silent = false)
+        {
+            foreach (string path in framePaths)
+            {
+                UxmlAttribute uxml = new(path);
+                IBaseNodeMixin elementRoot = Find(documentNode, uxml.Root, throwExceptions, silent);
+
+                if (elementRoot != null && !rootMetadata.ContainsKey(elementRoot))
+                    rootMetadata.Add(elementRoot, new RootMetadata(filter, uxml, UxmlDownloadImages.Everything));
+            }
+        }
         #endregion
 
         #region Methods

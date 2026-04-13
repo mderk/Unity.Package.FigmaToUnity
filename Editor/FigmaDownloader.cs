@@ -42,6 +42,85 @@ namespace Figma
         #endregion
 
         #region Methods
+        /// <summary>
+        /// Fetch shallow document structure (depth=2) for frame listing.
+        /// </summary>
+        internal async Task<string> FetchShallowAsync(CancellationToken token) => await GetJsonAsync($"files/{fileKey}?depth=2", token);
+
+        /// <summary>
+        /// Run import using string frame paths (for EditorWindow workflow).
+        /// </summary>
+        internal async Task Run(bool downloadImages, string uxmlName, IReadOnlyList<string> framePaths, bool prune, int progress, CancellationToken token)
+        {
+            Directory.CreateDirectory(framesDirectoryPath = assetsInfo.GetAbsolutePath(framesDirectoryName));
+            Directory.CreateDirectory(imagesDirectoryPath = assetsInfo.GetAbsolutePath(imagesDirectoryName));
+            Directory.CreateDirectory(elementsDirectoryPath = assetsInfo.GetAbsolutePath(elementsDirectoryName));
+            Directory.CreateDirectory(componentsDirectoryPath = assetsInfo.GetAbsolutePath(componentsDirectoryName));
+
+            int steps = downloadImages ? 5 : 4;
+            bool filter = framePaths.Count > 0;
+
+            await assetsInfo.cachedAssets.LoadAsync(token);
+
+            Progress.Report(progress, 1, steps, "Downloading file");
+
+            List<string> visibleSceneNodes = new(32);
+
+            if (filter)
+            {
+                Progress.SetDescription(progress, "Filtering nodes");
+
+                Data shallowData = await GetAsync<Data>($"files/{fileKey}?depth=2", token);
+                shallowData.document.SetParent();
+
+                NodeMetadata shallowMetadata = new(shallowData.document, framePaths, true, false, true);
+                visibleSceneNodes.AddRange(shallowData.document.children.SelectMany(x => x.children).Where(shallowMetadata.EnabledInHierarchy).Select(node => node.id));
+
+                Progress.SetDescription(progress, string.Empty);
+            }
+
+            string idsString = string.Empty;
+
+            if (visibleSceneNodes.Any())
+                idsString = $"?ids={string.Join(",", visibleSceneNodes)}";
+
+            Progress.SetDescription(progress, "Resolving Figma file");
+            string json = await GetJsonAsync($"files/{fileKey}{idsString}", token);
+
+            Progress.Report(progress, 2, steps, "Parsing Figma file");
+
+            Data data = await ConvertOnBackgroundAsync<Data>(json, token);
+            data.document.SetParent();
+
+            Progress.SetDescription(progress, "Creating entities");
+            nodeMetadata = new NodeMetadata(data.document, framePaths, filter);
+            nodesRegistry = new NodesRegistry(data, nodeMetadata);
+            stylesPreprocessor = new StylesPreprocessor(data, assetsInfo);
+            figmaWriter = new FigmaWriter(assetsInfo.directory, uxmlName, data, stylesPreprocessor, nodeMetadata, assetsInfo);
+
+            Progress.Report(progress, 3, steps, "Downloading missing components");
+            await DownloadDocumentsAsync(token);
+
+            if (downloadImages)
+            {
+                Progress.Report(progress, 4, steps, "Downloading images");
+                Progress.SetDescription(progress, "Writing Gradients");
+                await WriteGradientsAsync(token);
+                Progress.SetDescription(progress, "Downloading image fills");
+                await GetImageFillsAsync(progress, nodesRegistry.ImageFills, token);
+                Progress.SetDescription(progress, $"Downloading {KnownFormats.png} files");
+                await GetImageNodesAsync(progress, nodesRegistry.Pngs, UxmlDownloadImages.RenderAsPng, KnownFormats.png, token);
+                Progress.SetDescription(progress, $"Downloading {KnownFormats.svg} files");
+                await GetImageNodesAsync(progress, nodesRegistry.Svgs, UxmlDownloadImages.RenderAsSvg, KnownFormats.svg, token);
+                await assetsInfo.cachedAssets.SaveAsync();
+            }
+
+            Progress.SetStepLabel(progress, string.Empty);
+
+            Progress.Report(progress, steps, steps, "Updating *.uss/*.uxml files");
+            await figmaWriter.WriteAsync(prune);
+        }
+
         internal async Task Run(bool downloadImages, string uxmlName, IReadOnlyCollection<Type> frames, bool prune, bool filter, bool systemCopyBuffer, int progress, CancellationToken token)
         {
             Directory.CreateDirectory(framesDirectoryPath = assetsInfo.GetAbsolutePath(framesDirectoryName));
