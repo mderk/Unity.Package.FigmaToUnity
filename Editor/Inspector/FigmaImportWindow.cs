@@ -59,6 +59,8 @@ namespace Figma.Inspectors
         Vector2 scrollPosition;
         string searchBar = "";
         bool thumbnailsLoading;
+        Vector2 selectedScrollPosition;
+        UnityEngine.Rect cachedScrollRect;
         readonly List<(FrameInfo frame, string pageName)> visibleRows = new();
         #endregion
 
@@ -361,22 +363,22 @@ namespace Figma.Inspectors
             List<FrameInfo> selectedFrames = frames.Where(f => f.selected).ToList();
             if (selectedFrames.Count > 0)
             {
-                EditorGUILayout.LabelField("Selected", EditorStyles.miniLabel);
-                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                EditorGUILayout.LabelField($"Selected ({selectedFrames.Count})", EditorStyles.miniLabel);
+                float selectedHeight = Mathf.Min(selectedFrames.Count * (EditorGUIUtility.singleLineHeight + 2), 120);
+                selectedScrollPosition = EditorGUILayout.BeginScrollView(selectedScrollPosition, GUILayout.Height(selectedHeight + 8));
+                foreach (FrameInfo sf in selectedFrames)
                 {
-                    foreach (FrameInfo sf in selectedFrames)
+                    using (new EditorGUILayout.HorizontalScope())
                     {
-                        using (new EditorGUILayout.HorizontalScope())
+                        EditorGUILayout.LabelField(sf.path, EditorStyles.miniLabel);
+                        if (GUILayout.Button("x", EditorStyles.miniButton, GUILayout.Width(20)))
                         {
-                            EditorGUILayout.LabelField(sf.path, EditorStyles.miniLabel);
-                            if (GUILayout.Button("x", EditorStyles.miniButton, GUILayout.Width(20)))
-                            {
-                                sf.selected = false;
-                                SaveSelectedFrames();
-                            }
+                            sf.selected = false;
+                            SaveSelectedFrames();
                         }
                     }
                 }
+                EditorGUILayout.EndScrollView();
                 EditorGUILayout.Space(4);
             }
 
@@ -409,7 +411,8 @@ namespace Figma.Inspectors
 
             // Reserve total height with a single Space, then draw visible rows via manual Rect
             GUILayout.Space(totalHeight);
-            UnityEngine.Rect scrollRect = GUILayoutUtility.GetLastRect();
+            if (Event.current.type == EventType.Repaint)
+                cachedScrollRect = GUILayoutUtility.GetLastRect();
 
             int firstVisible = Mathf.Max(0, Mathf.FloorToInt(scrollPosition.y / rowHeight));
             float viewHeight = position.height;
@@ -417,7 +420,7 @@ namespace Figma.Inspectors
 
             for (int i = firstVisible; i < lastVisible; i++)
             {
-                UnityEngine.Rect rowRect = new(scrollRect.x, scrollRect.y + i * rowHeight, scrollRect.width, rowHeight);
+                UnityEngine.Rect rowRect = new(cachedScrollRect.x, cachedScrollRect.y + i * rowHeight, cachedScrollRect.width, rowHeight);
                 (FrameInfo frame, string pageName) = visibleRows[i];
 
                 if (frame == null)
