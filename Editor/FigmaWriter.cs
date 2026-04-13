@@ -81,12 +81,12 @@ namespace Figma
                 framesPaths.TryAdd(canvasNode.name, new List<string>());
 
             UnityEngine.Debug.Log($"[FigmaImport] WriteAsync: {rootNodes.Frames.Count} frames, {rootNodes.ComponentSets.Count} componentSets, {rootNodes.Elements.Count} elements, {rootNodes.Canvases.Count} canvases");
-            foreach (var f in rootNodes.Frames) UnityEngine.Debug.Log($"[FigmaImport]   Frame: {f.name} (parent: {f.parent?.name} [{f.parent?.GetType().Name}])");
-            // Debug: log all FrameNodes found in document
-            foreach (var node in data.document.Flatten())
+            UnityEngine.Debug.Log($"[FigmaImport] SelectedRoots: {string.Join(", ", nodeMetadata.SelectedRoots.Select(r => $"{r.name} [{r.GetType().Name}]"))}");
+            // Debug: log canvas children
+            foreach (var canvas in rootNodes.Canvases)
             {
-                if (node is Internals.FrameNode fn)
-                    UnityEngine.Debug.Log($"[FigmaImport]   AllFrame: {fn.name} (parent: {fn.parent?.name} [{fn.parent?.GetType().Name}], isSelectedRoot: {nodeMetadata.IsSelectedRoot(fn)})");
+                if (canvas is Internals.IChildrenMixin cm && cm.children != null && cm.children.Length > 0)
+                    UnityEngine.Debug.Log($"[FigmaImport]   Canvas '{canvas.name}': {cm.children.Length} children — {string.Join(", ", cm.children.Take(5).Select(c => $"{c.name}[{c.GetType().Name}]"))}");
             }
             List<Task> tasks = new(rootNodes.Frames.Count + rootNodes.ComponentSets.Count + rootNodes.Elements.Count);
             tasks.AddRange(rootNodes.Frames.Select(x => Task.Run(() => WriteFrame(uxmlBuilder, framesPaths, componentSets, x))));
