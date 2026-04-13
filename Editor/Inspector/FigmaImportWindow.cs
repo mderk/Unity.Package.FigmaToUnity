@@ -357,7 +357,7 @@ namespace Figma.Inspectors
         {
             Directory.CreateDirectory(CacheDirectory);
             CacheEntry entry = new() { json = json, documentName = docName, cachedAt = DateTime.UtcNow.ToString("O") };
-            File.WriteAllText(GetCachePath(key), JsonUtility.ToJson(entry));
+            File.WriteAllText(GetCachePath(key), JsonUtility.ToJson(entry, false));
         }
 
         bool TryLoadFromDiskCache(string key)
