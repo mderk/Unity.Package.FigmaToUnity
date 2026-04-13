@@ -59,7 +59,6 @@ namespace Figma.Inspectors
         Vector2 scrollPosition;
         string searchBar = "";
         bool thumbnailsLoading;
-        UnityEngine.Rect cachedSpaceRect;
         readonly List<(FrameInfo frame, string pageName)> visibleRows = new();
         #endregion
 
@@ -416,65 +415,56 @@ namespace Figma.Inspectors
                 EditorGUILayout.LabelField("All Frames", EditorStyles.miniLabel);
             }
 
-            // --- All frames (virtualized via GUILayout.Space + manual Rect) ---
+            // --- All frames (virtualized) ---
             float allFramesHeight = totalRows * rowHeight;
+            float allFramesY = selectedSectionHeight;
+            float contentWidth = EditorGUIUtility.currentViewWidth - 20;
             GUILayout.Space(allFramesHeight);
-            UnityEngine.Rect spaceRect = GUILayoutUtility.GetLastRect();
 
-            if (Event.current.type == EventType.Repaint)
-                cachedSpaceRect = spaceRect;
+            int firstVisible = Mathf.Max(0, Mathf.FloorToInt((scrollPosition.y - allFramesY) / rowHeight));
+            int lastVisible = Mathf.Min(totalRows, Mathf.CeilToInt((scrollPosition.y - allFramesY + position.height) / rowHeight) + 1);
 
-            if (cachedSpaceRect.width > 1)
+            for (int i = firstVisible; i < lastVisible; i++)
             {
-                int firstVisible = Mathf.Max(0, Mathf.FloorToInt((scrollPosition.y - cachedSpaceRect.y) / rowHeight));
-                int lastVisible = Mathf.Min(totalRows, Mathf.CeilToInt((scrollPosition.y - cachedSpaceRect.y + position.height) / rowHeight) + 1);
+                UnityEngine.Rect rowRect = new(0, allFramesY + i * rowHeight, contentWidth, rowHeight);
+                (FrameInfo frame, string pageName) = visibleRows[i];
 
-                for (int i = firstVisible; i < lastVisible; i++)
+                if (frame == null)
                 {
-                    UnityEngine.Rect rowRect = new(cachedSpaceRect.x, cachedSpaceRect.y + i * rowHeight, cachedSpaceRect.width, rowHeight);
-                    (FrameInfo frame, string pageName) = visibleRows[i];
+                    UnityEngine.Rect labelRect = new(rowRect.x, rowRect.y, rowRect.width - 36, rowRect.height);
+                    EditorGUI.LabelField(labelRect, pageName, EditorStyles.miniLabel);
 
-                    if (frame == null)
+                    UnityEngine.Rect btnRect = new(rowRect.xMax - 34, rowRect.y, 32, rowRect.height);
+                    string page = pageName;
+                    List<FrameInfo> pageFrames = frames.Where(f => f.pageName == page).ToList();
+                    bool allSelected = pageFrames.All(f => f.selected);
+
+                    if (GUI.Button(btnRect, allSelected ? "none" : "all", EditorStyles.miniButton))
                     {
-                        UnityEngine.Rect labelRect = new(rowRect.x, rowRect.y, rowRect.width - 36, rowRect.height);
-                        EditorGUI.LabelField(labelRect, pageName, EditorStyles.miniLabel);
-
-                        UnityEngine.Rect btnRect = new(rowRect.xMax - 34, rowRect.y, 32, rowRect.height);
-                        string page = pageName;
-                        List<FrameInfo> pageFrames = frames.Where(f => f.pageName == page).ToList();
-                        bool allSelected = pageFrames.All(f => f.selected);
-
-                        if (GUI.Button(btnRect, allSelected ? "none" : "all", EditorStyles.miniButton))
-                        {
-                            bool newState = !allSelected;
-                            pageFrames.ForEach(f => f.selected = newState);
-                            SaveSelectedFrames();
-                        }
-                    }
-                    else
-                    {
-                        float xOffset = rowRect.x;
-
-                        if (hasThumbnails && frame.thumbnail != null)
-                        {
-                            float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
-                            float thumbWidth = thumbnailHeight * aspect;
-                            UnityEngine.Rect thumbRect = new(xOffset, rowRect.y, thumbWidth, thumbnailHeight);
-                            GUI.DrawTexture(thumbRect, frame.thumbnail, UnityEngine.ScaleMode.ScaleToFit);
-                            xOffset += thumbWidth + 4;
-                        }
-
-                        UnityEngine.Rect toggleRect = new(xOffset, rowRect.y, rowRect.xMax - xOffset, rowRect.height);
-                        EditorGUI.BeginChangeCheck();
-                        frame.selected = EditorGUI.ToggleLeft(toggleRect, frame.frameName, frame.selected);
-                        if (EditorGUI.EndChangeCheck())
-                            SaveSelectedFrames();
+                        bool newState = !allSelected;
+                        pageFrames.ForEach(f => f.selected = newState);
+                        SaveSelectedFrames();
                     }
                 }
-            }
-            else
-            {
-                Repaint();
+                else
+                {
+                    float xOffset = rowRect.x;
+
+                    if (hasThumbnails && frame.thumbnail != null)
+                    {
+                        float aspect = (float)frame.thumbnail.width / frame.thumbnail.height;
+                        float thumbWidth = thumbnailHeight * aspect;
+                        UnityEngine.Rect thumbRect = new(xOffset, rowRect.y, thumbWidth, thumbnailHeight);
+                        GUI.DrawTexture(thumbRect, frame.thumbnail, UnityEngine.ScaleMode.ScaleToFit);
+                        xOffset += thumbWidth + 4;
+                    }
+
+                    UnityEngine.Rect toggleRect = new(xOffset, rowRect.y, rowRect.xMax - xOffset, rowRect.height);
+                    EditorGUI.BeginChangeCheck();
+                    frame.selected = EditorGUI.ToggleLeft(toggleRect, frame.frameName, frame.selected);
+                    if (EditorGUI.EndChangeCheck())
+                        SaveSelectedFrames();
+                }
             }
 
             EditorGUILayout.EndScrollView();
