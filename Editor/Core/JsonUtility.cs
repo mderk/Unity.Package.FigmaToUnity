@@ -73,12 +73,16 @@ namespace Figma.Internals
         public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
         {
             JArray array = JArray.Load(reader);
-            T[] result = new T[array.Count];
+            System.Collections.Generic.List<T> list = new(array.Count);
 
             for (int i = 0; i < array.Count; ++i)
-                result[i] = ToObject((JObject)array[i], serializer);
+            {
+                T item = ToObject((JObject)array[i], serializer);
+                if (item != null)
+                    list.Add(item);
+            }
 
-            return result;
+            return list.ToArray();
         }
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
         {
@@ -90,7 +94,26 @@ namespace Figma.Internals
 
             writer.WriteEndArray();
         }
-        protected TEnum GetValue(JObject obj, string name = "type") => (TEnum)Enum.Parse(typeof(TEnum), obj[name].Value<string>());
+        protected TEnum GetValue(JObject obj, string name = "type")
+        {
+            string value = obj[name]?.Value<string>();
+            if (value != null && Enum.TryParse(typeof(TEnum), value, out object result))
+                return (TEnum)result;
+            Debug.LogWarning($"[FigmaToUnity] Unknown {typeof(TEnum).Name} value: '{value}'. Skipping.");
+            return default;
+        }
+        protected bool TryGetValue(JObject obj, out TEnum value, string name = "type")
+        {
+            string raw = obj[name]?.Value<string>();
+            if (raw != null && Enum.TryParse(typeof(TEnum), raw, out object result))
+            {
+                value = (TEnum)result;
+                return true;
+            }
+            Debug.LogWarning($"[FigmaToUnity] Unknown {typeof(TEnum).Name} value: '{raw}'. Skipping node.");
+            value = default;
+            return false;
+        }
         protected abstract T ToObject(JObject obj, JsonSerializer serializer);
         #endregion
     }
@@ -99,14 +122,15 @@ namespace Figma.Internals
     {
         #region Methods
         protected override Effect ToObject(JObject obj, JsonSerializer serializer) =>
-            GetValue(obj) switch
+            TryGetValue(obj, out var type) ? type switch
             {
                 EffectType.INNER_SHADOW => obj.ToObject<ShadowEffect>(serializer),
                 EffectType.DROP_SHADOW => obj.ToObject<ShadowEffect>(serializer),
                 EffectType.LAYER_BLUR => obj.ToObject<BlurEffect>(serializer),
                 EffectType.BACKGROUND_BLUR => obj.ToObject<BlurEffect>(serializer),
-                _ => throw new NotSupportedException()
-            };
+                EffectType.NOISE or EffectType.TEXTURE => obj.ToObject<BlurEffect>(serializer),
+                _ => null
+            } : null;
         #endregion
     }
 
@@ -114,7 +138,7 @@ namespace Figma.Internals
     {
         #region Methods
         protected override Paint ToObject(JObject obj, JsonSerializer serializer) =>
-            GetValue(obj) switch
+            TryGetValue(obj, out var type) ? type switch
             {
                 PaintType.SOLID => obj.ToObject<SolidPaint>(serializer),
                 PaintType.GRADIENT_LINEAR => obj.ToObject<GradientPaint>(serializer),
@@ -123,8 +147,9 @@ namespace Figma.Internals
                 PaintType.GRADIENT_DIAMOND => obj.ToObject<GradientPaint>(serializer),
                 PaintType.IMAGE => obj.ToObject<ImagePaint>(serializer),
                 PaintType.EMOJI => obj.ToObject<ImagePaint>(serializer),
-                _ => throw new NotSupportedException()
-            };
+                PaintType.PATTERN => obj.ToObject<ImagePaint>(serializer),
+                _ => null
+            } : null;
         #endregion
     }
 
@@ -132,13 +157,13 @@ namespace Figma.Internals
     {
         #region Methods
         protected override LayoutGrid ToObject(JObject obj, JsonSerializer serializer) =>
-            GetValue(obj, "pattern") switch
+            TryGetValue(obj, out var type, "pattern") ? type switch
             {
                 Pattern.COLUMNS => obj.ToObject<RowsColsLayoutGrid>(serializer),
                 Pattern.ROWS => obj.ToObject<RowsColsLayoutGrid>(serializer),
                 Pattern.GRID => obj.ToObject<GridLayoutGrid>(serializer),
-                _ => throw new NotSupportedException()
-            };
+                _ => null
+            } : null;
         #endregion
     }
 
@@ -146,14 +171,14 @@ namespace Figma.Internals
     {
         #region Methods
         protected override ExportSettings ToObject(JObject obj, JsonSerializer serializer) =>
-            GetValue(obj, "format") switch
+            TryGetValue(obj, out var type, "format") ? type switch
             {
                 Format.JPG => obj.ToObject<ExportSettingsImage>(serializer),
                 Format.PNG => obj.ToObject<ExportSettingsImage>(serializer),
                 Format.SVG => obj.ToObject<ExportSettingsSVG>(serializer),
                 Format.PDF => obj.ToObject<ExportSettingsPDF>(serializer),
-                _ => throw new NotSupportedException()
-            };
+                _ => null
+            } : null;
         #endregion
     }
 
@@ -164,16 +189,23 @@ namespace Figma.Internals
         public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
         {
             JObject obj = JObject.Load(reader);
-            return (TransitionType)Enum.Parse(typeof(TransitionType), obj["type"]!.Value<string>()) switch
+            string typeStr = obj["type"]?.Value<string>();
+            if (typeStr == null || !Enum.TryParse(typeof(TransitionType), typeStr, out object result))
+            {
+                Debug.LogWarning($"[FigmaToUnity] Unknown TransitionType value: '{typeStr}'. Skipping.");
+                return null;
+            }
+            return (TransitionType)result switch
             {
                 TransitionType.DISSOLVE => obj.ToObject<SimpleTransition>(serializer),
                 TransitionType.SMART_ANIMATE => obj.ToObject<SimpleTransition>(serializer),
+                TransitionType.SCROLL_ANIMATE => obj.ToObject<SimpleTransition>(serializer),
                 TransitionType.MOVE_IN => obj.ToObject<DirectionalTransition>(serializer),
                 TransitionType.MOVE_OUT => obj.ToObject<DirectionalTransition>(serializer),
                 TransitionType.PUSH => obj.ToObject<DirectionalTransition>(serializer),
                 TransitionType.SLIDE_IN => obj.ToObject<DirectionalTransition>(serializer),
                 TransitionType.SLIDE_OUT => obj.ToObject<DirectionalTransition>(serializer),
-                _ => throw new NotSupportedException()
+                _ => null
             };
         }
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer) => throw new NotImplementedException();
@@ -184,12 +216,12 @@ namespace Figma.Internals
     {
         #region Methods
         protected override BaseNode ToObject(JObject obj, JsonSerializer serializer) =>
-            GetValue(obj) switch
+            TryGetValue(obj, out var type) ? type switch
             {
                 NodeType.DOCUMENT => obj.ToObject<DocumentNode>(serializer),
                 NodeType.CANVAS => obj.ToObject<CanvasNode>(serializer),
-                _ => throw new NotSupportedException()
-            };
+                _ => null
+            } : null;
         #endregion
     }
 
@@ -197,7 +229,7 @@ namespace Figma.Internals
     {
         #region Methods
         protected override SceneNode ToObject(JObject obj, JsonSerializer serializer) =>
-            GetValue(obj) switch
+            TryGetValue(obj, out var type) ? type switch
             {
                 NodeType.SLICE => obj.ToObject<SliceNode>(serializer),
                 NodeType.FRAME => obj.ToObject<FrameNode>(serializer),
@@ -214,8 +246,9 @@ namespace Figma.Internals
                 NodeType.RECTANGLE => obj.ToObject<RectangleNode>(serializer),
                 NodeType.TEXT => obj.ToObject<TextNode>(serializer),
                 NodeType.SECTION => obj.ToObject<SectionNode>(serializer),
-                _ => throw new NotSupportedException()
-            };
+                NodeType.SHAPE_WITH_TEXT or NodeType.CONNECTOR or NodeType.STICKY or NodeType.TABLE or NodeType.TABLE_CELL or NodeType.WASHI_TAPE or NodeType.WIDGET or NodeType.EMBED or NodeType.LINK_UNFURL or NodeType.TEXT_PATH or NodeType.TRANSFORM_GROUP => obj.ToObject<VectorNode>(serializer),
+                _ => null
+            } : null;
         #endregion
     }
 
