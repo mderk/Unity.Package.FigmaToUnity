@@ -378,8 +378,15 @@ namespace Figma.Inspectors
                     }
                 }
                 EditorGUILayout.EndScrollView();
-                EditorGUILayout.Space(4);
             }
+
+            // Separator
+            EditorGUILayout.Space(2);
+            UnityEngine.Rect sepRect = EditorGUILayout.GetControlRect(false, 1);
+            EditorGUI.DrawRect(sepRect, new Color(0.3f, 0.3f, 0.3f, 1f));
+            EditorGUILayout.Space(2);
+
+            EditorGUILayout.LabelField("All Frames", EditorStyles.miniLabel);
 
             bool hasThumbnails = frames.Any(f => f.thumbnail != null);
             float rowHeight = hasThumbnails ? thumbnailHeight + 4 : EditorGUIUtility.singleLineHeight + 2;
