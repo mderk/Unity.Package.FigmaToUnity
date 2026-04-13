@@ -45,7 +45,12 @@ namespace Figma
         /// <summary>
         /// Fetch shallow document structure (depth=2) for frame listing.
         /// </summary>
-        internal async Task<string> FetchShallowAsync(CancellationToken token) => await GetJsonAsync($"files/{fileKey}?depth=2", token);
+        internal async Task<string> FetchShallowAsync(CancellationToken token, Action<string> progress = null)
+        {
+            onProgress = progress;
+            try { return await GetJsonAsync($"files/{fileKey}?depth=2", token); }
+            finally { onProgress = null; }
+        }
 
         /// <summary>
         /// Run import using string frame paths (for EditorWindow workflow).

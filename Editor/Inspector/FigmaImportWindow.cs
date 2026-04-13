@@ -569,7 +569,11 @@ namespace Figma.Inspectors
                     using FigmaDownloader downloader = new(PersonalAccessToken, fileKey,
                         new AssetsInfo(Application.dataPath, "Assets", "temp", Array.Empty<string>()));
 
-                    string json = await downloader.FetchShallowAsync(CancellationToken.None);
+                    string json = await downloader.FetchShallowAsync(CancellationToken.None, status =>
+                    {
+                        fetchProgressLabel = status;
+                        Repaint();
+                    });
 
                     fetchProgressLabel = "Parsing response...";
                     Repaint();

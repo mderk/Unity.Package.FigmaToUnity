@@ -1,7 +1,9 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -15,12 +17,13 @@ namespace Figma
         #region Consts
         const int maxRetries = 3;
         const int defaultRetrySeconds = 10;
-    const int maxRetrySeconds = 30;
+        const int maxRetrySeconds = 30;
         #endregion
 
         #region Fields
         protected readonly string fileKey;
         protected readonly HttpClient httpClient;
+        protected Action<string> onProgress;
         #endregion
 
         #region Constructors
@@ -44,11 +47,34 @@ namespace Figma
         {
             for (int attempt = 0; attempt <= maxRetries; attempt++)
             {
+                onProgress?.Invoke("Connecting...");
+
                 using HttpRequestMessage request = new(HttpMethod.Get, url);
-                HttpResponseMessage response = await httpClient.SendAsync(request, token);
+                HttpResponseMessage response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
 
                 if (response.IsSuccessStatusCode)
-                    return await response.Content.ReadAsStringAsync();
+                {
+                    long? contentLength = response.Content.Headers.ContentLength;
+                    using Stream stream = await response.Content.ReadAsStreamAsync();
+                    StringBuilder sb = new();
+                    byte[] buffer = new byte[8192];
+                    long totalRead = 0;
+                    int bytesRead;
+
+                    while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, token)) > 0)
+                    {
+                        sb.Append(Encoding.UTF8.GetString(buffer, 0, bytesRead));
+                        totalRead += bytesRead;
+
+                        if (contentLength.HasValue && contentLength.Value > 0)
+                            onProgress?.Invoke($"Downloading... {totalRead / 1024}KB / {contentLength.Value / 1024}KB");
+                        else
+                            onProgress?.Invoke($"Downloading... {totalRead / 1024}KB");
+                    }
+
+                    onProgress?.Invoke("Download complete.");
+                    return sb.ToString();
+                }
 
                 if (response.StatusCode == (HttpStatusCode)429 && attempt < maxRetries)
                 {
@@ -56,7 +82,9 @@ namespace Figma
                     if (response.Headers.TryGetValues("Retry-After", out var values) && int.TryParse(values.First(), out int parsed) && parsed > 0)
                         retryAfter = Math.Min(parsed, maxRetrySeconds);
 
-                    Debug.LogWarning($"[FigmaToUnity] Rate limited. Retrying in {retryAfter}s (attempt {attempt + 1}/{maxRetries})...");
+                    string msg = $"Rate limited. Retrying in {retryAfter}s (attempt {attempt + 1}/{maxRetries})...";
+                    Debug.LogWarning($"[FigmaToUnity] {msg}");
+                    onProgress?.Invoke(msg);
                     await Task.Delay(retryAfter * 1000, token);
                     continue;
                 }
