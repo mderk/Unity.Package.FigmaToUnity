@@ -78,7 +78,7 @@ namespace Figma
             Dictionary<string, IReadOnlyList<string>> framesPaths = new(rootNodes.Frames.Count);
 
             foreach (CanvasNode canvasNode in rootNodes.Canvases)
-                framesPaths.Add(canvasNode.name, new List<string>());
+                framesPaths.TryAdd(canvasNode.name, new List<string>());
 
             List<Task> tasks = new(rootNodes.Frames.Count + rootNodes.ComponentSets.Count + rootNodes.Elements.Count);
             tasks.AddRange(rootNodes.Frames.Select(x => Task.Run(() => WriteFrame(uxmlBuilder, framesPaths, componentSets, x))));
