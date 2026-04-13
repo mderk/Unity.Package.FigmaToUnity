@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using UnityAsyncAwaitUtil;
+using System.Threading;
 using UnityEngine;
 
 namespace Figma.Core.Uxml
@@ -15,6 +15,8 @@ namespace Figma.Core.Uxml
     internal class UxmlBuilder
     {
         #region Fields
+        static readonly SynchronizationContext unitySyncContext = SynchronizationContext.Current;
+
         readonly Data data;
         readonly NodeMetadata nodeMetadata;
         readonly string globalUssFilePath;
@@ -172,7 +174,7 @@ namespace Figma.Core.Uxml
                 {
                     // Since this code only runs from Parallel, outside of Unity scope
                     // We cannot use Debug.Log() without returning to Unity's thread
-                    SyncContextUtil.UnitySynchronizationContext.Post(_ => Debug.LogWarning(BuildTargetMessage($"Target {nameof(Component)} for node", instanceNode.GetFullPath(), "is not found")), null);
+                    unitySyncContext.Post(_ => Debug.LogWarning(BuildTargetMessage($"Target {nameof(Component)} for node", instanceNode.GetFullPath(), "is not found")), null);
                     WriteDefaultFrameNode(instanceNode, writer);
                 }
             }

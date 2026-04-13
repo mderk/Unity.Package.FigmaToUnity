@@ -6,8 +6,7 @@
   "unity": "2022.3",
   "dependencies": {
     "com.unity.vectorgraphics": "2.0.0-preview.25",
-    "com.unity.nuget.newtonsoft-json": "3.2.1",
-    "com.trackman.asyncawaitutil": "1.0.7"
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
   },
   "author": "TrackMan",
   "type": "trackman.package",

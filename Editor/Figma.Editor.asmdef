@@ -3,7 +3,6 @@
     "rootNamespace": "Figma.Editor",
     "references": [
         "Unity.VectorGraphics.Editor",
-        "AsyncAwaitUtil",
         "CommonUtils",
         "Figma"
     ],
