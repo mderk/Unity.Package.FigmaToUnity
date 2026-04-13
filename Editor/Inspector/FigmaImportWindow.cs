@@ -48,6 +48,7 @@ namespace Figma.Inspectors
         string importProgressLabel;
         string fetchProgressLabel;
         Stopwatch fetchStopwatch;
+        CancellationTokenSource fetchCts;
 
         List<FrameInfo> frames = new();
         List<RecentFile> recentFiles = new();
@@ -227,10 +228,16 @@ namespace Figma.Inspectors
             if (fetching && fetchProgressLabel.NotNullOrEmpty())
                 EditorGUILayout.LabelField(fetchProgressLabel, EditorStyles.miniLabel);
 
-            // Fetch / Refresh buttons
+            // Fetch / Refresh / Cancel buttons
             using (new EditorGUILayout.HorizontalScope())
             {
                 GUILayout.FlexibleSpace();
+
+                if (fetching)
+                {
+                    if (GUILayout.Button("Cancel", GUILayout.Width(60)))
+                        fetchCts?.Cancel();
+                }
 
                 bool hasCachedFrames = frames.Count > 0;
 
@@ -551,6 +558,7 @@ namespace Figma.Inspectors
                 }
 
                 fetchStopwatch = Stopwatch.StartNew();
+                fetchCts = new CancellationTokenSource();
 
                 void PollFetch()
                 {
@@ -569,7 +577,7 @@ namespace Figma.Inspectors
                     using FigmaDownloader downloader = new(PersonalAccessToken, fileKey,
                         new AssetsInfo(Application.dataPath, "Assets", "temp", Array.Empty<string>()));
 
-                    string json = await downloader.FetchShallowAsync(CancellationToken.None, status =>
+                    string json = await downloader.FetchShallowAsync(fetchCts.Token, status =>
                     {
                         fetchProgressLabel = status;
                         Repaint();
@@ -596,6 +604,10 @@ namespace Figma.Inspectors
                     fetchStopwatch.Stop();
                 }
             }
+            catch (OperationCanceledException)
+            {
+                SetStatus("Fetch cancelled.", MessageType.Warning);
+            }
             catch (Exception e)
             {
                 SetStatus($"Failed to fetch: {e.Message}", MessageType.Error);
@@ -606,6 +618,8 @@ namespace Figma.Inspectors
                 fetching = false;
                 fetchProgressLabel = null;
                 fetchStopwatch = null;
+                fetchCts?.Dispose();
+                fetchCts = null;
                 Repaint();
             }
         }
